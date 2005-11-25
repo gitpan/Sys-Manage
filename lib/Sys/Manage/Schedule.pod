@@ -1,0 +1,544 @@
+=head1 NAME
+
+Sys::Manage::Schedule - Scriptic schedule trunk
+
+
+=head1 SYNOPSIS
+
+=over
+
+=item Script ('atSched.pl')
+
+  use Sys::Manage::Schedule;
+  my $s =Sys::Manage::Schedule->new([@ARGV], -option=>value,..);
+
+  if ($s->at('-a')) {	# at any other item execution
+	...
+  }
+  if ($s->at('-'	# at system scheduler arguments given
+	,'17:20','/interactive','/every:M,T,W,Th,F,S,Su') {
+	...
+  }
+  if ($s->at('-'	# ... automatically filling arguments repeating
+	,['17:23','/interactive','/every:M,T,W,Th,F,S,Su']
+	,['17:24'])) {
+	...
+  }
+  if ($s->at('-s',0)) {	# at operating system startup, if automatic win32 service
+	...
+  }
+  if ($s->at('-d0')) {	# at the beginning of the day
+	...
+  }
+  if ($s->at('-d2s')) {	# at the end of the day, switching user
+	...
+  }
+
+=item Command line
+
+	perl atSched.pl -runmod atarg
+
+	-set		(default) add/replace scriptic schedule into system schedule
+	-setdel		clear scriptic schedule from system schedule
+	-run	atarg	running 'atarg' entry from system scheduler
+	-runsu	atarg	running 'atarg' entry switching user
+	-svcinst	install scriptic schedule as win32 service to switch user
+	-svcinst user password
+	-svcdel		remove scriptic schedule win32 sevice	
+
+=item 'at' call options
+
+	-a		run at any '-run'/'-runsu'
+	-s		run switching user
+	-w		redirect stdout and stderr into log file
+	-d0 -d1 -d2	at day   begin, middle, end
+	-n0 -n1 -n2	at night begin, middle, end
+
+=back
+
+=head1 DESCRIPTION
+
+The purpose of this module is to implement a scriptic schedules 
+or scripts for scheduling and executing Perl codes inside.
+
+A benefit of this module is preliminary for Win32 platform
+with 'at' commands and impersonations, then for UNIX where 'crontab':
+
+* Keeping persistent or significant scheduled commands in a file (C<at>, C<-set>).
+
+* Automatically filling repeating scheduler arguments (C<at>).
+
+* Running impersonated (switched user, C<-s>).
+
+* Logging of execution (C<-dirv>, C<-w>, C<runlog>, C<vfname>).
+
+* Scheduling relative at day or night begin/middle/end (C<-d0>,C<-d1>,C<-d2>,C<-n0>,C<-n1>,C<-n2>).
+
+* Scheduling cyclic tasks (C<soon>)
+
+* Scheduling at operating system startup (C<-s>,0).
+
+
+
+This module is implemented and tested with Perl 5.6.0 on Windows 2000.
+
+
+
+=head1 SLOTS
+
+=over
+
+=item SLOTS
+
+Usually no options need to be mentioned in a scriptic schedule.
+
+
+
+=item -d0
+
+	=>8
+
+=item -d1
+
+	=>12
+
+=item -d2
+
+	=19
+
+Day begin, middle, end hour.
+See also C<AT OPTIONS>, C<-n0>, C<-n1>, C<-n2>.
+
+
+=item -dirb
+
+	=> base directory
+
+Base directory of script execution, filled automatically using $0.
+
+
+=item -dirm
+
+	=> directory marker sign
+
+Directory marker, '/' or '\', filled automatically using $0 or $^O.
+
+
+=item -dirv
+
+	=> variables directory
+
+Directory for log and flag files.
+Default is existing 'C<-dirb>/var' subdirectory,
+or C<-prgcn> will be created.
+Log file automatic truncation implemented, see C<-logmax>.
+
+
+=item -logmax
+
+	=> about 1024*1024 | false
+
+Maximum size of log file, bytes. Used for automatic truncation.
+
+
+
+=item -n0
+
+	=>22
+
+=item -n1
+
+	=>0
+
+=item -n2
+
+	=5
+
+Night begin, middle, end hour.
+See also C<AT OPTIONS>, C<-d0>, C<-d1>, C<-d2>.
+
+
+
+=item -prgcn
+
+	=> f($0)
+
+Common name of script,
+used also in C<-dirv> subdirectory,
+filled automatically using $0.
+
+
+
+=item -prgfn
+
+	=> f($0)
+
+Full file name of script, filled automatically using $0.
+
+
+
+=item -prgsn
+
+	=> f($0)
+
+Short file name of script,
+used also as win32 service name (C<-svcinst>), 
+filled automatically using $0.
+
+
+
+=item -runmod
+
+	=> run mode
+
+Run mode of script.
+To be obtained from command line.
+
+See also C<RUN MODES>.
+
+
+=item -runarg
+
+	=> schedule arguments escaped
+
+Schedule entry to be executed while some C<-runmod> (C<-run>, C<-runsu>).
+To be obtained from command line.
+
+
+=item -time
+
+	=> time()
+
+=item -timel
+
+	=> localtime()
+
+Time and localtime when script started
+
+
+
+
+=back
+
+
+=head1 METHODS
+
+=over
+
+=item METHODS
+
+The main methods are C<new> and C<at>.
+
+
+=item at (?-options, ?scheduler arguments, ?sub{}) -> allow execution
+
+=item at (?-options, scheduler arguments,..) -> allow execution
+
+=item at (?-options, [scheduler arguments],..) -> allow execution
+
+=item at (?-options, entryName) -> allow execution
+
+=item at (?-options) -> allow execution
+
+
+Header of scriptic schedule entry.
+Or scriptic schedule entry itself, if sub{} given.
+Allows execution of entry if C<-run> or C<-runsu>.
+Or sets corresponding system scheduler entries if C<-set>.
+
+Special entryName '0' is intended for operating system startup event
+(may be implemented, i.e., as a result of C<-svcinst>).
+
+See also C<AT OPTIONS>, C<soon>.
+
+
+
+=item chpswd (user, password, additional host || [host, service],..) -> success
+
+Changes Windows user and service password.
+Service name estimated is C<-prgsn>.
+Default user is C<-prgcn>.
+Default password is autogenerated.
+Additional computers and/or services will be processed after local,
+treating empty computer as local and empty service as C<-prgsn>.
+
+Implemented for Windows only, Windows Resource Kit used.
+
+
+
+=item cmdfile (script file, command file)
+
+=item cmdfile (script file, command file => history file)
+
+=item cmdfile (script file, command file, ? history file, ? redirect log file)
+
+=item cmdfile (sub{}(command row, redirect log file),...)
+
+Proceeds text file interpreting rows as script commands
+and moving rows proceeded to history file if given.
+
+This is an utility method from L<Sys::Manage::CmdFile|Sys/Manage/CmdFile>
+may be useful sometimes.
+
+Example:
+
+	$s->cmdfile(sub{$s->runlcl("perl ./bin/smcmv.pl -vt $_") ||die $?>>8}
+		, './var-cmd/cmd-night-assign.txt', undef, 'cmd-log.txt');
+	$s->cmdfile(sub{$s->runlcl("perl ./bin/smcmv.pl -vt $_") ||die $?>>8}
+		, './var-cmd/cmd-night-do.txt', 'cmd-night-done.txt','cmd-log.txt');
+	$s->cmdfile(sub{$s->runlcl("perl ./bin/smcmv.pl -vt $_") ||die $?>>8}
+		, './var-cmd/cmd-night-sched.txt', undef, 'cmd-log.txt');
+
+
+=item ftruncate (file name) -> success
+
+Truncates file to C<-logmax>, if greater then.
+
+
+
+
+=item fwrite (file name, string,...) -> success
+
+=item fwrite (>>file name, string,...) -> success
+
+Writes file or appends to it.
+
+
+
+=item new ('class', -option=>value,..) -> new object
+
+=item new ('class', [command line arguments], -option=>value,..) -> new object
+
+Creates new Sys::Manage::Schedule object. 
+See also C<set> syntax.
+
+
+=item printflush (print arguments) -> print result
+
+Prints STDOUT with $|=1.
+May be useful where output redirections.
+
+
+
+=item run (OS command, arg,..) -> !($?>>8)
+
+=item runopen (OS command, arg,..) -> IO::Handle
+
+=item runlist (OS command, arg,..) -> output strings list
+
+=item runlcl (OS command, arg,..) -> !($?>>8)
+
+=item runlog (OS command, arg,..) -> !($?>>8)
+
+Executes operating system command alike L<system|perlfunc>().
+Using C<runlcl>, only command line and exit code will be logged.
+For C<runlog> redirection, L<IPC::Open3|IPC/Open3> used, instead of
+immediate STDOUT/STDERR redirection in C<-w>.
+
+
+
+=item set () -> (slot names of the object)
+
+=item set (-option) -> value of the option given
+
+=item set (-option=>value,..) -> self object
+
+=item set ([command line arguments], -option=>value,..) -> self object
+
+Retrieves and sets values of the C<SLOTS>.
+$s->{-option} direct access may be used also, 
+but C<set> smartly processes some options.
+
+
+
+=item soon (?-options, seconds, entryName, sub{}) -> result
+
+Cyclic entry in scriptic schedule.
+Sub{} will be executed after seconds given since its previous execution.
+The first sub{} execution depends on the script executions.
+
+Implemented for Windows only.
+
+See also C<at>, C<-i>, C<-s>, C<-w>.
+
+
+
+=item soon (?-options, seconds, 'command line') -> at
+
+=item soon (?-options, seconds, 'self', -runmod, -runarg) -> at
+
+Schedules command line given with delay, C<-i> option is available.
+Alike 'soon' utility in Windows Resource Kit.
+
+
+
+=item vfname (partial file name) -> full file name
+
+File name, based on C<-dirv>, C<-dirm>, C<-prgcn>.
+Log file name is C<vfname>('log.txt');
+lock file name is C<vfname>('lck.txt');
+Additional lock file name is C<vfname>('lcs.txt');
+C<-d0> flag file name is C<vfname>('d0.txt').
+This method may be useful forming names of additional log files.
+
+
+
+=back
+
+=head1 AT OPTIONS
+
+=over
+
+=item AT OPTIONS
+
+C<at> call options considered as a first argument beginning with '-' sign.
+Several options may be catenated into options string 
+without additional '-' signs.
+
+
+=item -a
+
+Execute at any C<-run> or C<-runsu>.
+
+
+=item -d0
+
+=item -d1
+
+=item -d2
+
+=item -n0
+
+=item -n1
+
+=item -n2
+
+Execute
+daily at the beginning/middle/end of the day,
+or nightly at the beginning/middle/end of the night.
+Only one of this options may be included in each C<at>.
+
+
+=item -i
+
+Execute interactivelly,
+C<soon> only.
+
+
+=item -s
+
+Execute switching user (C<-runsu>).
+
+On Win32 user may be switched 
+using impersonated service (installed via C<-svcinst>),
+or via WMI (C<-susr> and C<-spsw> required).
+
+On other platforms 'su' is called by 'root', 'sudo' otherwise.
+
+
+
+=item -w
+
+Write (redirect) STDOUT/STDERR into log file.
+See better C<runlog>, instead of C<-w>, which may not work sometimes.
+
+
+
+
+=back
+
+=head1 RUN MODES
+
+=over
+
+=item RUN MODES
+
+Usually operator need not deal with any run mode, 
+because C<-set> is default, when empty arguments.
+
+The mainly used run modes are
+C<-set>, C<-setdel>, C<-run>, C<-runsu>.
+
+Supplemental run modes are
+C<-svcinst>, C<-svcdel>.
+
+Internal run mode is C<-surun>
+
+
+=item -run
+
+Run C<-runarg> entry.
+
+
+=item -runsu
+
+Run C<-runarg> entry switching user (C<-s> option of C<at>).
+
+
+=item -set
+
+Remove existing scriptic schedule entries (recognized using C<-prgfn>) 
+from the system schedule ('at' or 'crontab').
+Add actual scriptic schedule using C<at> method calls
+resulting in 'at' or 'crontab' calls.
+
+
+=item -setdel
+
+Remove existing scriptic schedule entries (recognized using C<-prgfn>)
+from the system schedule ('at' or 'crontab').
+
+
+=item -svcdel
+
+Remove C<-prgsn> win32 service.
+
+See also C<-svcinst>.
+
+
+=item -svcinst
+
+Create C<-prgsn> win32 service using 'instsrv' and 'srvany' 
+from Windows Resource Kit.
+Additional command line arguments are user name and password.
+
+Service may be needed to switch user (C<-s>, C<-runsu>).
+
+Service may be deleted using C<-svcdel>.
+
+Settings of service created should be checked.
+
+
+=item -surun
+
+Switch user and execute C<-runsu> C<-runarg>.
+Used internally for transition from system scheduler.
+
+
+=back
+
+=head1 VERSION
+
+=over
+
+=item  '2005-09-15'
+
+Started
+
+
+=back
+
+=head1 LICENSE
+
+This is free software; 
+you can use redistribute it and/or modify it 
+under the same terms as Perl itself.
+
+
+
+=head1 AUTHOR
+
+Andrew V Makarow <makarow at mail.com>, for tav
+
+=cut
+

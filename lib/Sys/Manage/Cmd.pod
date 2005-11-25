@@ -1,0 +1,725 @@
+=head1 NAME
+
+Sys::Manage::Cmd - Systems management command volley
+
+
+=head1 SYNOPSIS
+
+=over
+
+=item Command line script
+
+  use Sys::Manage::Cmd;
+  my $s =Sys::Manage::Cmd->new();
+
+  # Script associations (see also embedded in source):
+  $s->{-assoc}->{'.ftp'}=sub{['ftp','-n','-s:loginfile','!elem!','<',$_[1]->[0]]};
+
+  # Target collections:
+  $s->{-target}->{'all'}	=[1,2,3,4,5,6];
+
+  # Target branches:
+  $s->{-branch}->{1}	=[1,2];
+  $s->{-branch}->{2}	=[3,4];
+  $s->{-branch}->{3}	=[5,6];
+
+  # Command-line setup / loop:
+  $s->set([@ARGV]);
+
+  # Command assignments:
+  #$s->set(-k=>'assign', -o=>'b', -i=>0, -ping=>1);
+  #$s->execute(-a=>'assignment name', -t=>[targets], -cline=>[command line]);
+  #...
+
+  # Command line execution:
+  $s->set(-k=>'cmd', -o=>'b', -i=>0, -ping=>0);
+  $s->execute([@ARGV]);
+
+
+=item Command line
+
+	script -option -option... target command-line
+
+
+=item Options of command line
+
+	-kNameSpace	- kind (namespace) of command
+	-rCommandId	- redo command id (used also inside '-l'); or switch (for '-a')
+	-aAssignName	- assignment name, to use as command id
+	-lPauseSecs	- loop with pause before each subsequent redo
+	-o(s|c|b)	- order of execution: 
+				's'equental
+				'c'oncurrent
+				'b'ranched (concurrent branches)
+	-tTargetName	- target, may be several '-t', instead of positional argument
+	-xTargetExcl	- exclusion from target list, may be several '-x'
+	-g		- if ping, or -gPingTimeout
+	-i		- ignore exit code
+	-v(0|1|2)	- verbosity level
+	-vt		- verbosity including date-time
+
+
+=item Examples of command line
+
+	script		  all		dir !elem!
+	script -ob	-tall		dir !elem!
+	script -rPrevId	-tall		dir !elem!
+	script -aTest	-tall		dir !elem!
+	script -l10	-tall		dir !elem!
+
+=item Embedding command line
+
+	if (!$ENV{SMELEM}) {	# command volley:
+		system($^X, 'script', '-k0', 'target', $0)
+	} else {		# command script:
+		....
+	}
+
+=back
+
+=head1 DESCRIPTION
+
+The purpose of this module is to implement a command volley scripts.
+Such script should describe collections of targets and should 
+contain a simple code to execute command line given 
+for each target expanded.
+Such script can contain immediate command lines to be executed
+and may be scheduled.
+Executions of command line (stdout and stderr) are logged into file system.
+Logging is used also to exclude already executed assignments and 
+successfully executed loops.
+Autotruncation of log file systems prevents excess.
+
+Command execution or command assignment metaphors are
+a significant part of many systems management programs.
+This module may be a simplest implementation.
+There is no user interface and database, 
+only Perl script(s), file system, command lines.
+
+This module is implemented and tested with Perl 5.6.0 on Windows 2000.
+
+
+
+=head1 CONCEPTS
+
+=over
+
+=item CONCEPTS
+
+There are several basic ideas:
+
+=item Name space or kind of commands
+
+A several kinds of commands may be imagined, i.e. 
+scheduled periodical commands,
+operator initiated actions,
+significant assignments.
+Each kind of commands will have separate subdirectory for log file system.
+Each kind of commands may have separate subdirectory for command scripts.
+This is useful at least when reading and autotruncating logs.
+[C<-ckind>, C<ENVIRONMENT>]
+
+=item Command execution identifiers or assignment names
+
+The identifiers are an unique strings automatically sequentially generated.
+This is useful for ordinary periodical or operator initiated commands.
+Given by operator assignment names may be used instead of automatically 
+generated identifiers.
+Autotruncation of log file system is missed when using assignment name.
+[C<-cassign>, C<-credo>, C<ENVIRONMENT>]
+
+=item Loops, Redoes, Assignments, Ping
+
+Loop is a periodical restart of command until success for all targets.
+Redo is a single reexecution of command into existing command identifier
+for all unsuccessful or not affected targets.
+Assignment is a single (re)execution of command for all not affected targets.
+Redo is used inside Loop and may be used separately.
+Loop may be used with Assignment, 
+but may be better to write a special script for assignments and schedule it.
+Redo switch may be used with Assignment to extend command execution 
+to unsuccessful targets.
+Ping switch may be used with Assignment to avoid error registrations
+for hosts inaccessible.
+[C<-cassign> and C<-ping>, C<-credo>, C<-cloop>]
+
+=item Targets
+
+Target collections are named lists of elements to be expanded until target elements.
+Target collections or target elements are used to execute command line given 
+for each target element.
+There are no assumptions on the nature of target (i.e. computer, daemon, user...).
+Only the name of the target element ('!elem!') may be substituted 
+into command line (see C<-cline> for other substitutions possible).
+Networked features, except C<-ping>, are a subject for a separate script(s) or module(s),
+i.e. L<Sys::Manage::Conn|Sys/Manage/Conn> via C<-assoc>.
+[C<-cline>, C<-ctarget>, C<-cxtgt>, C<-target>]
+
+=item Branches of targets
+
+Sequential execution of commands may be too long.
+Concurrent execution may be too exacting in system resources or telecommunications.
+So, branched execution implemented as
+concurrently executed branches with sequentially executed target elements.
+Target collections are named lists of elements to be expanded until target elements
+using target collections.
+[C<-branch>, C<-corder>]
+
+=item Script associations
+
+Sometimes a system administrator writes a script with loop to execute command for each target.
+When targets are already described, a command line should be simplest for real improvement.
+I.e. 'volley Collection SomeScript.pl' may be typed instead of 'perl SomeScript.pl'.
+But this is also way for unusual scripts, like ftp.
+A last but one command line element '<' results in opening the last element as input stream for command.
+[C<-assoc>]
+
+=back
+
+=head1 SLOTS
+
+=over
+
+=item SLOTS
+
+
+=item -assoc
+
+	=> {association name =>[command line template],...}
+
+	=> {association name =>sub{}(self, [command line]),...}
+
+Associations for commands.
+Association may be command name, file name or file name extension.
+
+See source code for predefinitions and examples.
+Consider L<Sys::Manage::Conn|Sys/Manage/Conn> commands in the source code:
+'rcmd' and 'lcmd',
+'rdo' and 'ldo' (and script file names matching /\.(rdo|rdo)(?:\.\w+){0,1}$/i),
+'fput', 'fget'.
+
+See also C<-cline>.
+
+
+=item -branch
+
+	=> {branch name => [branch elements],...}
+
+Branches of C<-target>s.
+Used in C<-corder>.
+Will be expanded using C<-target>.
+
+
+=item -cassign
+
+=item -a
+
+	=> assignment name
+
+Command assignment name.
+See also C<-credo>.
+
+
+
+=item -cbranch
+
+=item -b
+
+	=> false | branch name
+
+Command ordering branch name. 
+Used internally in C<-corder> processing.
+
+
+
+=item -cerr
+
+	=> false | [exit code, running, missed]
+
+Statistics of unsuccessful executions of command by C<execute>.
+
+
+
+=item -cfg
+
+=item -config
+
+	=> false | true | filename
+
+Instruction to load configuration file. 
+Default file name is 'Sys-Manage-Cmd-cfg.pl'.
+It will be searched in C<ENVIRONMENT>, within 'bin' and 'var' 
+subdirectories and base directory.
+$_ will contain object to be configured.
+
+See also L<Sys::Manage::Conn|Sys/Manage/Conn> configuration file.
+
+
+
+=item -cid
+
+	=> false | command identifier
+
+Identifier of command C<execute>ed.
+
+
+
+=item -cignor
+
+=item -i
+
+	=> false | true
+
+Command exit code ignoring.
+Default is to consider and register non-zero exit code as unsuccessful.
+
+
+=item -ckind
+
+=item -k
+
+	=> 'cmd' | name space
+
+Kind (name space) of commands.
+Special '0' value brings to obtain real value from C<-cline> path
+as considered in C<ENVIRONMENT>.
+
+
+
+=item -cline
+
+	=>[command line]
+
+Command line or command line template to be executed.
+
+
+B<Command script search path> (see also C<ENVIRONMENT>):
+If command file (the first command line element usually) 
+is not found with L<-f|perlfunc> operation,
+C<-dirb>/lib-C<-ckind>, C<-dirb>/lib, C<-dirb>/bin paths tried.
+
+
+B<String substitutions> (see also C<-vsml>, C<-vsmr>, C<ENVIRONMENT>):
+
+!elem! - element name, also !host! and !node! may be used.
+
+!log! - log filesystem name.
+
+!pswd! - password, using C<-pswd>.
+
+!user! - user name, using C<-user>.
+
+'<' (last but one) - open last element as input stream.
+
+
+B<Special commands> (in C<-assoc> syntax):
+
+['do', 'perl script file',...] - execute via L<do|perlfunc>('perl script file').
+
+['eval', 'perl code',...] - execute via L<eval|perlfunc>('perl code').
+
+['eval', sub{}(self, args),...] - execute via L<eval|perlfunc>{&}.
+
+['-e', 'perl code',...] - execute via '$^X -e'.
+
+
+B<L<Sys::Manage::Conn|Sys/Manage/Conn> commands> (implemented via C<-assoc>):
+'rcmd' and 'lcmd', 
+'rdo' and 'ldo' (and script file names matching /\.(ldo|rdo)(?:\.\w+){0,1}$/i), 
+'fput', 'fget'
+
+
+B<Quoting or escaping of command line arguments>: 
+Forming command line, any argument will be (re)quoted automatically 
+if special characters found.
+L<Sys::Manage::Conn::rdo|Sys/Manage/Conn> arguments will be (re)quoted automatically.
+Single L<Sys::Manage::Conn::rcmd|Sys/Manage/Conn> argument 
+will not be (re)quoted automatically to allow rich shell command lines.
+
+
+B<Exit code>:
+Usually exit code of the command is $?>>8 and 0 is treated as success.
+Scripts be evaluating (via 'do', 'eval' or '-e') 
+should return true value on success,
+false or L<die|perlfunc> otherwise.
+L<Sys::Manage::Conn::rdo|Sys/Manage/Conn> returns result of the script or !($?>>8).
+
+
+
+=item -cloop
+
+=item -l
+
+	=> false | seconds to pause
+
+Loop (cyclical execution until success) requirement and pause size 
+for subsequent turns.
+
+
+=item -cpause
+
+=item -p
+
+	=> false | true
+
+Command prestart pause.
+Used internally in C<-cloop> processing.
+
+
+=item -corder
+
+=item -o
+
+	=> 's' | 'c' | 'b'
+
+Command execution order:
+
+	's'equental
+	'c'oncurrent
+	'b'ranched (concurrent branches)
+
+
+=item -credo
+
+=item -r
+
+	=> false | true (1|'y'|'+') | command id
+
+Command identifier to redo.
+Or switch to extend C<-cassign> field to unsuccessful targets.
+Used also in C<-cloop> processing.
+
+
+=item -ctarget
+
+=item -t
+
+	=> target | [targets]
+
+Command target(s).
+Will be expanded using C<-target>.
+
+
+=item -cxtgt
+
+=item -x
+
+	=> target | [targets]
+
+Targets to exclude from command execution.
+Will be expanded using C<-target>.
+
+
+=item -dirb
+
+	=> base directory
+
+Base directory for volley script execution.
+Default via $0.
+See also C<ENVIRONMENT>.
+
+
+=item -dirl
+
+	=> limit of logged commands
+
+Logged commands limit.
+Overfilling results deletion of oldest entries.
+See source code for default.
+
+
+=item -dirm
+
+	=> directory marker sign
+
+Directory marker, '/' or '\'.
+Default via $0 or $^O.
+
+
+=item -dsmd
+
+	=> undef | sub{}(self, -target|-branch|-user|-pswd|-assoc, ?name) -> [values]
+
+External metadata store interface.
+May be used instead any of C<-target>, C<-branch>, C<-user>, C<-pswd>, C<-assoc> 
+slot to obtain names and values.
+
+
+=item -echo
+
+=item -v
+
+	=> 2 | 0
+
+Echo printout level, verbosity level.
+
+
+=item -echot
+
+=item -vt
+
+	=> false | true
+
+Including date-time with echo printout, may be useful redirecting STDOUT.
+
+
+=item -log
+
+	=> false | true | log file name
+
+Operation logging switch.
+For separate summary log file
+in addition to command execution registration file systems.
+
+
+=item -logevt
+
+	=> undef | 'Sys::Syslog' | 'Win32::EventLog' | 'opcmsg' |
+	=> sub{}(self, elem log, [command line], '' | unsuccess reason)
+
+=item -logevth*
+
+	=> undef | -logevt handle
+
+Element commanding event trigger.
+'-logevth*' names may be used to store trigger object or handle.
+In addition to C<-log>.
+
+
+=item -ping
+
+=item -g
+
+	=> undef | true | pingtime | ping object
+
+=item -pingcount
+
+	=> 4 | number of attempts
+
+=item -pingprot
+
+	=> 'icmp' | protocol name
+
+=item -pingtime
+
+	=> 15 | number of seconds
+
+Target element ping check switch and ping parameters, using L<Net::Ping|Net/Ping>.
+Command execution for inaccessible target will not be performed 
+and registered as erroneous, but will be reported as missed. 
+So, C<-cassign> may be repeated for this target.
+
+
+
+=item -pswd
+
+	=> undef | {user=>password,...} | sub{}(self, elem, user)
+
+User password discoverer for C<-cline> substitutions.
+See also C<-user>.
+
+
+
+=item -reject
+
+	=> undef | sub{}(self) -> reject message
+
+Commands reject condition.
+May be useful supplying service to suboperators 
+through L<Sys::Manage::CmdFile|Sys/Manage/CmdFile> or C<cmdfile>.
+
+L<$ENV{SMCFP}|Sys/Manage/CmdFile>, C<istarget>, C<isscript> may be mentioned in conditions.
+
+Example:
+
+  $s->set(-reject=>sub{
+	if (!$ENV{SMCFP}) {}
+	elsif ($ENV{SMCFP} =~/\b(?:Admin|Administrator|root|test)\b/i) {
+		$_[0]->set(-k=>$1) 
+			if $ENV{SMCFP} =~/(sched|assign)/i
+			&& ($_[0]->{-ckind} eq 'cmd');
+	}
+	elsif ($ENV{SMCFP} =~/\b(?:Operator)\b/i) {
+		$_[0]->set(-k=>($ENV{SMCFP} =~/(assign)/ ? "op-$1" : 'op-cmd'));
+		return('illegal target') if !$_[0]->istarget('collection');
+		return('illegal script') if !$_[0]->isscript('lib-op');
+	}
+	else {	return("unconsidered queue '$ENV{SMCFP}'") } ''});
+
+
+=item -target
+
+	=> {collection name => [collection elements],...}
+
+
+Collections of targets for commands.
+Not described target considered as target element too.
+
+
+=item -user
+
+	=> undef | {elem=>user,...} | {elem=>[user, password],...} | sub{}(self, elem)
+
+User name discoverer for C<-cline> substitutions.
+See also C<-pswd>.
+
+
+=item -vsml
+
+=item -vsmr
+
+	=> '!'
+
+Left and right substitution marks for command line.
+See also C<-cline>.
+
+
+=back
+
+
+=head1 METHODS
+
+
+=over
+
+=item METHODS
+
+
+
+=item cmdfile (script file, command file)
+
+=item cmdfile (script file, command file => history file)
+
+=item cmdfile (script file, command file, ? history file, ? redirect log file)
+
+=item cmdfile (sub{}(command row, redirect log file),...)
+
+Proceeds text file interpreting rows as script commands
+and moving rows proceeded to history file if given.
+
+This is an utility method from L<Sys::Manage::CmdFile|Sys/Manage/CmdFile>
+may be useful sometimes.
+
+
+
+=item execute (-option=>value,...) -> success
+
+=item execute ([command line arguments],-option=>value,...) -> success
+
+Executes C<-cline> for each C<-ctarget> expanded using C<-target> and C<-cxtgt>.
+
+Fundamental result method.
+
+
+=item isscript (?'lib') -> exists?
+
+=item istarget (targets possible) -> contains?
+
+Useful for C<-reject>
+checks of command script and targets requested by C<-cline> and C<-ctarget>.
+
+Script is checked to be within C<-ckind> lib directory,
+or 'lib' directory if it listed.
+
+Targets are checked to be within possible targets listed.
+
+
+
+=item new ('class', -option=>value,...) -> new object
+
+=item new ('class', [command line arguments], -option=>value,...) -> new object
+
+Creates new Sys::Manage::Cmd object. 
+See also C<set> syntax.
+
+
+
+=item set () -> (slot names of the object)
+
+=item set (-option) -> value of the option given
+
+=item set (-option=>value,...) -> self object
+
+=item set ([command line arguments], -option=>value,...) -> self object
+
+Retrieves and sets values of the C<SLOTS>.
+$s->{-option} direct access may be used also, 
+but C<set> smartly processes some options.
+
+Within the same C<set> call, 
+'-options' overwrites [command line arguments],
+so default values should be set before.
+
+When [command line arguments] used, 
+subsequent branch or loop may be executed implicitly.
+
+
+
+
+=back
+
+=head1 ENVIRONMENT
+
+=over
+
+=item ENVIRONMENT
+
+
+$ENV{SMCFP}	- from L<Sys::Manage::CmdFile|Sys/Manage/CmdFile>.
+
+$ENV{SMDIR}	- base directory for volley script execution, C<-dirb>. May be used as sign of flow under L<Sys::Manage::Cmd|Sys/Manage/Cmd> but not L<Sys::Manage::Conn::rdo|Sys/Manage/Conn>.
+
+$ENV{SMELEM}	- target element name. May be used as sign of flow under L<Sys::Manage::Cmd|Sys/Manage/Cmd> or L<Sys::Manage::Conn::rdo|Sys/Manage/Conn>.
+
+$ENV{SMLIB}	- directory of command script executing, if found.
+
+$ENV{SMLOG}	- log filesystem name considering command or assignment id and target element.
+
+$ENV{SMPID}	- management script process id.
+
+$ENV{SMPSWD}	- target element password.
+
+$ENV{SMUSER}	- target element user.
+
+./	- base directory, C<-dirb>, also may be used for volley script and writing command scripts.
+
+./bin	- system scripts (including volley script) and useful utilities, if exists.
+
+./lib	- command scripts library to find files to execute.
+
+./lib-namespace	- specialized --"--, for each C<-ckind>.
+
+./log-namespace	- C<-ckind> command execution registration file system, for each C<-ckind>.
+
+./var	- persistent data - stored variables, summary log, etc..
+
+
+=back
+
+
+
+=head1 VERSION
+
+=over
+
+=item '2005-09-09'
+
+Started
+
+
+=back
+
+=head1 LICENSE
+
+This is free software; 
+you can use redistribute it and/or modify it 
+under the same terms as Perl itself.
+
+
+
+=head1 AUTHOR
+
+Andrew V Makarow <makarow at mail.com>, for demed
+
+=cut
+

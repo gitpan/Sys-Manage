@@ -1,0 +1,33 @@
+NAME
+    Sys::Manage - Systems management commands/scripts environment
+
+DESCRIPTION
+    Sys::Manage::Cmd - Systems management command volley
+
+    Sys::Manage::Conn - Connection to remote Perl
+
+    Sys::Manage::Schedule - Scriptic schedule trunk
+
+    See particular modules.
+
+LICENSE
+    This is free software; you can use redistribute it and/or modify it
+    under the same terms as Perl itself.
+
+AUTHOR
+    Andrew V Makarow <makarow at mail.com>
+	
+PREREQUISITES
+    Currently implemented and tested on Win32 Active Perl 5.6.
+
+HOW TO BUILD AND INSTALL
+
+    Type:
+	
+	perl Makefile.PL
+	make
+	make install
+    Or:
+	copy ./lib/Sys/* into perl/site/lib/Sys
+
+    See examples, which should be configured and installed manually.

@@ -1,0 +1,47 @@
+=head1 NAME
+
+Sys::Manage - Systems management commands/scripts environment
+
+
+=head1 DESCRIPTION
+
+L<Sys::Manage::Cmd|Sys/Manage/Cmd> - Systems management command volley
+
+L<Sys::Manage::Conn|Sys/Manage/Conn> - Connection to remote Perl
+
+L<Sys::Manage::Schedule|Sys/Manage/Schedule> - Scriptic schedule trunk
+
+See particular modules.
+
+
+=head1 LICENSE
+
+This is free software; 
+you can use redistribute it and/or modify it 
+under the same terms as Perl itself.
+
+
+=head1 VERSION
+
+=over
+
+
+=item '2005-11-25'
+
+Publishing 0.50 version.
+
+
+=item '2005-09-09'
+
+Started
+
+
+=back
+
+
+=head1 AUTHOR
+
+Andrew V Makarow <makarow at mail.com>
+
+=cut
+

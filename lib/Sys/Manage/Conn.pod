@@ -1,0 +1,846 @@
+=head1 NAME
+
+Sys::Manage::Conn - Connection to remote Perl
+
+
+=head1 SYNOPSIS
+
+=over
+
+=item Script
+
+  use Sys::Manage::Conn;
+  my $s =Sys::Manage::Conn->new([@ARGV], -option=>value,...)->connect();
+
+  $s->reval('print "Hello World,"\\n";');
+  $s->rcmd('dir');
+  $s->reval(['cd'], ';print "Hello World,"\\n";');
+  $s->reval('print "Hello World,"\\n";', ['logname']);
+  print $s->rfread('/etc/passwd');
+  $s->rfget('c:\\autoexec.sys', $s->{-tmp} .'.txt');
+  $s->rdo('/my/files/script.pl');
+
+
+=item Command line utility
+
+  #!perl -w
+  use Sys::Manage::Conn;
+  my $s =Sys::Manage::Conn->connect([@ARGV], -exec=>1, -option=>value,...);
+  exit($?>>8);
+
+  script 0 rcmd		dir
+  script 0 fget		/etc/passwd	/secure/passwd
+  script 0 fget	-p	/etc		/secure/etc
+  script 0 rdo		/my/files/script.pl
+  script 0 rdo	-p	"%HOME%\packages\package.zip\start.bat"
+
+
+=item Command line
+
+  script -vde node:port user:password other-args
+
+  (all command line arguments are optional, at least first will be 'node' or 0)
+
+	-v		verbose mode, from 'v1' to 'v3'
+	-d		debug mode (step-by-step execution)
+	-e		execute rest of command line
+	node		remote computer name or tcp/ip address, 0 for local
+	port		remote computer IO::Socket::INET server port
+	user		user name on remote computer
+	password	password to login
+
+	other-args (using '-e' or '-exec=>1'; '?' - optional):
+
+		rcmd	?-'o-e-		os-command	argumets-list
+		rdo	?-o-e-p		?os-command !	local-script	?args
+		fget	?-'mp		remote-source	local-target
+		fput	?-'mp		local-source	remote-target
+
+		where:
+			-'	quote remote arg with "'"
+			-o-	refuse STDOUT
+			-e-	refuse STDERR
+			-p, -z	pack file(s)
+			-m	move file(s)
+
+=back
+
+=head1 DESCRIPTION
+
+This module starts on remote computer Perl command line
+implementing L<IO::Socket::INET|IO/Socket/INET> server
+to accept Perl source strings and return results.
+This may be considered as an agent implementation within Perl command line.
+The source may be seen using C<-v>3 option or C<-echo>=3.
+
+There may be various methods to start Perl command line mentioned
+and corresponding C<-init> and C<-perl> values.
+Default is 'wmi' for Windows and 'rsh' otherwise.
+
+The security is only tcp/ip address of manager, 
+C<-chkip> value with default.
+
+
+
+This module is implemented and tested with Perl 5.6.0 on Windows 2000.
+
+
+=head1 ABOUT REMOTE AGENT CONSTRUCTIONS
+
+=over
+
+There may be a several variants.
+
+
+=item Agent as a Perl Command Line
+
+This variant is currently implemented.
+
+Agent is a Perl command line (about 300 bytes) started via some remote command service:
+
+  perl -e "use IO::Socket;$r_=IO::Socket::INET->new(LocalPort=>8008,Reuse=>1,Listen=>1);$m_=$r_->accept();$r_->close;die if $m_->peerhost ne '127.0.0.1';while(defined($r_=$m_->getline)){$@=undef;$r_=eval $r_;$m_->printflush(\"\n----ret\$?\$!\$\@: $?\t$!\t$^E\t$@\t$r_\n\")}"
+
+Additional agent code may be added to the first command evaluation.
+
+Advantages: lite agent, lite load.
+
+Disadvantages: agent size limitation.
+
+
+
+=item Agent loader as a Perl Command Line
+
+Agent will be loaded via a Perl command line (about 200 bytes) started via some remote command service:
+
+  perl -e "use IO::Socket;$r_=IO::Socket::INET->new(LocalPort=>8008,Reuse=>1,Listen=>1);$m_=$r_->accept();$r_->close;do eval $m_->getline if $m_->peerhost ne '127.0.0.1'"
+
+The first row transferred will be an agent loader, it should accept entire agent code and store it into temporary file.
+
+Advantages: agent may be more complex.
+
+Disadvantages: increased agent startup load.
+
+
+
+=item Separate Agent
+
+Agent is a script file to be distributed and started on computers.
+
+Advantages: agent may be very complex.
+
+Disadvantages: agent distribution and manager authorization should be implemented.
+
+=back
+
+=head1 SLOTS
+
+=over
+
+=item SLOTS
+
+The usually slots are 
+C<-init>, C<-node>, C<-user>, C<-echo> and C<-debug>, C<-argv>.
+
+=item -agent
+
+=item $m_
+
+	=> IO::Socket::INET
+
+Connection to remote agent. Established by C<connect>. Used internally.
+
+Evaluated on remote agent code may use C<$m_> variable.
+
+
+
+=item -argv
+
+	=> [rest of @ARGV unparsed]
+
+Command line arguments for script itself.
+Parsing C<set>([@ARGV]), some arguments first may be found for module,
+but arguments rest may be for script only.
+So, script may access it's own arguments via {C<-argv>}->[arg number].
+
+
+
+=item -cfg
+
+=item -config
+
+	=> false | true | filename
+
+Instruction to load configuration file.
+Default file name is 'Sys-Manage-Conn-cfg.pl'.
+It will be searched alike L<Sys::Manage::Cmd|Sys/Manage/Cmd>
+configuration file.
+$_ will contain object to be configured.
+
+
+
+=item -chkip
+
+	=> gethostbyname | ''
+
+TCP/IP address of manager (local node or host).
+Default value is given using 
+L<gethostbyname|perlfunc>
+(L<Sys::Hostname|Sys/Hostname> or L<Win32::NodeName|Win32>).
+
+
+=item -debug
+
+	=> false | true
+
+=item -d
+
+Debug mode.
+Automatically sets C<-echo>=3.
+
+
+=item -dirm
+
+	=> directory marker sign
+
+Directory marker, '/' or '\', filled automatically using $0 or $^O.
+
+
+=item -dirw
+
+	=> working directory
+
+Directory where script started.
+Obtained using L<Cwd|Cwd> or L<Win32::GetCwd|Win32>.
+
+
+=item -echo
+
+=item -v
+
+	=> 0 | 1 | 2 | 3
+
+Echo printout level, verbosity level.
+
+0 - none.
+
+1 - print commands invoking alike C<rcmd> or C<reval>.
+
+2 - print remote stdout and stderr accepting
+
+3 - print perl sources transfer
+
+See also C<-debug>, C<-progress>.
+
+
+
+=item -errchild
+
+	=> remote $?
+
+=item -errexit
+
+	=> remote $?>>8
+
+=item -erros
+
+	=> remote $!
+
+=item -erros1
+
+	=> remote $^E
+
+=item -erreval
+
+	=> remote $@
+
+Errors from perl source remotely evaluated.
+Accepted via C<getret>,
+where also local $? and $@ are filled from C<-errchild> and C<-erreval>.
+
+See also C<-reteval>.
+
+
+
+=item -error
+
+	=> 'die' | 'warn' | false
+
+Error or exception processing behaviour.
+
+
+=item -exec
+
+=item -e
+
+	=> false | true
+
+Execute C<-argv> within C<-connect>.
+The first argument may be a method name
+(C<rcmd>, C<reval>, C<fput>, C<fget>,...).
+Default considered as C<rcmd>.
+
+
+
+=item -init
+
+	=> 'wmi' | 'rsh' | 'telnet' | sub{}(self, agent command line) || ''
+
+Remote agent initiation method.
+WMI ('wmi') is default for Windows, 'rsh' otherwise.
+Empty agent initiation may be used with separate agent may be written.
+See also C<-perl>.
+
+
+=item -mark
+
+Command output end marker.
+Used by C<getret> to finish C<-agent> reading.
+
+
+=item -node
+
+	=> remote node
+
+Remote computer name or TCP/IP address to C<connect> to.
+See also C<-port>.
+
+
+=item -pack
+
+	=> 'zip' | 'arj' | 'tar'
+
+=item -packx
+
+	=> undef | 'unzip' |...
+
+Filesystem packer and unpacker used to provide C<-p+>.
+There may be a full path to call utility.
+
+
+=item -perl
+
+	=> 'perl'
+
+Discoverable file name of remote Perl interpreter.
+Default is 'perl', rely on $ENV{path}.
+
+
+=item -prgcn
+
+	=> f($0)
+
+=item -prgfn
+
+	=> f($0)
+
+Common and full names of script,
+filled automatically using $0.
+Common name is used in C<-tmp> value.
+
+
+=item -progress
+
+	=> true | false
+
+Output progress with C<-echo>.
+
+
+=item -pswd
+
+	=> false | password string
+
+Password to login C<-user> to C<-node> during C<connect>.
+Default behaviour tries without password
+
+
+=item -port
+
+	=> 8008
+
+Remote agent TCP/IP port number to listen by L<IO::Socket::INET|IO/Socket/INET>.
+See also C<-node>.
+
+
+=item -reteval
+
+	=> value or data structure
+
+Result of L<eval|perlfunc>uation of remote Perl source
+accepted by C<getret>.
+Result of last C<reval>.
+
+
+
+=item -tmp
+
+=item $t_
+
+	=> temporary file name
+
+Temporary file name.
+Filled using $ENV{TEMP} or $ENV{tmp}, C<-dirm>, C<-prgcn>.
+May be used to construct name of temporary file or directory.
+
+Evaluated on remote agent code may use C<$t_> variable.
+
+
+=item -timeout
+
+	=> undef
+
+Network operations timeout.
+
+
+=item -title
+
+	=> 'Remote command stream'
+
+Title to display sometimes...
+
+
+=item -user
+
+	=> false | user name
+
+Remote user name to login to C<-node> inside C<connect>.
+C<-pswd> also may be required.
+Default is current user.
+
+
+=item -wmi
+
+	=> undef | WMI object
+
+WMI L<Win32::OLE|Win32/OLE> connection, if opened by C<connect>.
+
+
+=back
+
+
+=head1 METHODS
+
+=over
+
+=item METHODS
+
+The main methods are C<new>, C<connect>, 
+C<reval>, C<rcmd>, C<fput>, C<fget>, C<rdo>.
+
+
+
+=item connect (-option=>value,...) -> self
+
+=item connect ([command line arguments], -option=>value,...) -> self
+
+=item connect ('class', [command line arguments], -option=>value,...) -> new object
+
+Connects to remote C<-node>,
+using C<-init>, C<-user>, C<-pswd>.
+Starts remote C<-perl> 
+with command line L<IO::Socket::INET|IO/Socket/INET> agent on C<-port>,
+connects C<-agent> to it.
+
+
+
+=item disconnect () -> self
+
+Closes connection opened.
+
+
+
+=item error (error message) -> error value
+
+Proceeds error according to C<-error>.
+Returns undef, if returns.
+
+
+
+=item fget (?-options, remote file name, local file name) -> success
+
+=item rfget (?-options, remote file name, local file name) -> success
+
+Reads remote file and writes it locally.
+
+Used C<METHOD CALL OPTIONS>: C<-'>, C<-m>, C<-b->, C<-s+>, C<-p+>.
+
+Default C<REMOTE SOURCE EXPANSION>: C<do{>.
+
+See also C<rfread>.
+
+
+
+=item fput (?-options, local file name, remote file name) -> success
+
+=item rfput (?-options, local file name, remote file name) -> success
+
+Reads local file and writes it remotely.
+
+Used C<METHOD CALL OPTIONS>: C<-'>, C<-m>, C<-b->, C<-s+>, C<-p+>.
+
+Default C<REMOTE SOURCE EXPANSION>: C<do{>.
+
+With C<-p+> option, archiver will not be used if local file is already packed.
+
+See also C<rfwrite>.
+
+
+
+=item lcmd (?-options, command and arguments, ?filter sub{}) -> success
+
+Locally executes command given.
+Command and arguments will be (re)quoted automatically,
+but single command will not be (re)quoted to allow rich shell command lines.
+
+
+=item lfread (?-options, local file name) -> content
+
+Reads local file and returns it's content.
+
+Used C<METHOD CALL OPTIONS>: C<-b->.
+
+See also C<rfread>, C<lfwrite>.
+
+
+
+=item lfwrite (?-options, local file name, content) -> success
+
+Writes to local file content given.
+
+Used C<METHOD CALL OPTIONS>: C<-b->.
+
+See also C<rfwrite>, C<lfread>.
+
+
+
+=item new ('class', -option=>value,...) -> new object
+
+=item new ('class', [command line arguments], -option=>value,...) -> new object
+
+Creates new Sys::Manage::Conn object. 
+See also C<set> syntax.
+
+
+
+=item rcmd (?-options, command and arguments, ?filter sub{}) -> success
+
+Remotely executes command given.
+Command and arguments will be (re)quoted automatically,
+but single command will not be (re)quoted to allow rich shell command lines.
+
+
+Used C<METHOD CALL OPTIONS>: C<-'>, C<-o->, C<-e->.
+
+Default C<REMOTE SOURCE EXPANSION>: C<do{>.
+
+
+
+=item rdo (?-options, local file, ?arguments,.., ?filter sub{}) -> result
+
+=item rdo (?-options, interpreter call, '!', local file, ?arguments,.., ?filter sub{}) -> result
+
+Transfers local file to temporary remote file,
+executes and unlinks it, returns result of execution.
+Command line arguments will be quoted automatically.
+Result is considered as return value of Perl L<do|perlfunc> or !($?>>8).
+
+'!' is default separator between optional interpreter command line 
+and file to be executed, see C<-e!>.
+Default interpreter associations may be found in the source code.
+General default is Perl script via L<do|perlsyn> "filename".
+
+Used C<METHOD CALL OPTIONS>: C<-o->, C<-e->, C<-e!>, C<-p+>.
+
+With C<-p+> option, the whole directory of command file 
+will be packed and transferred into temporary directory.
+As C<fput> used, this directory will not be packed if it is packed file already,
+i.e. 'rdo packedFile.zip/scriptFile.pl'
+
+
+
+
+=item reval (?-options, perl source strings, ?filter sub{}) -> result
+
+Remotely evaluates Perl source given.
+Returns result transferred using L<Data::Dumper|Data/Dumper>.
+
+Used C<METHOD CALL OPTIONS>: C<-o->, C<-e->.
+
+Default C<REMOTE SOURCE EXPANSION>: C<system(>.
+
+
+
+=item rfread (?-options, remote file name) -> content
+
+Reads remote file and returns it's content.
+
+Used C<METHOD CALL OPTIONS>: C<-'>, C<-b->.
+
+Default C<REMOTE SOURCE EXPANSION>: C<do{>.
+
+See also C<lfread>, C<rfget>, C<rfwrite>.
+
+
+
+=item rfwrite (?-options, remote file name, content) -> success
+
+Writes to remote file content given.
+
+Used C<METHOD CALL OPTIONS>: C<-'>, C<-b->.
+
+Default C<REMOTE SOURCE EXPANSION>: C<do{>.
+
+See also C<lfwrite>, C<rfput>, C<rfread>.
+
+
+
+=item set () -> (slot names of the object)
+
+=item set (-option) -> value of the option given
+
+=item set (-option=>value,...) -> self object
+
+=item set ([command line arguments], -option=>value,...) -> self object
+
+Retrieves and sets values of the C<SLOTS>.
+$s->{-option} direct access may be used also, 
+but C<set> smartly processes some options.
+
+
+
+=item wmi (?get object) -> wmi
+
+WMI connection or WMI object,
+after C<connect>, if C<-init>='wmi'.
+
+
+=back
+
+
+=head1 METHOD CALL OPTIONS
+
+=over
+
+=item METHOD CALL OPTIONS
+
+Method call options considered as a first argument of method call,
+beginning with '-' sign and letter.
+Several options may be catenated into options string 
+without additional '-' signs.
+
+
+=item -'
+
+=item -"
+
+Quoting for string arguments to embed into Perl source.
+Default is '"'.
+
+
+=item -b-
+
+=item -b0
+
+'b'inmode off.
+Switch off 'binmode' in file operations.
+Reserved, do not use.
+
+
+=item -e-
+
+=item -e0
+
+refuse STD'e'RR.
+Remain remote STDERR unredirected.
+
+
+=item -e!
+
+=item -e@
+
+=item -e#
+
+'e'xecution separator.
+Command line mark-up sign.
+
+
+=item -m
+
+=item -m+
+
+=item -m1
+
+'m'ove.
+Move file, delete remote file after transfer to manager.
+
+
+=item -o-
+
+=item -o0
+
+
+refuse STD'o'UT.
+Remain remote STDOUT unredirected.
+
+
+=item -p
+
+=item -p+
+
+=item -p1
+
+'p'ack, alias C<-z+>.
+Use C<-pack> archiver to compress source 
+for transfer and extract into target directory.
+C<fput> does not uses archiver if local file is already packed.
+
+
+=item -s
+
+=item -s+
+
+=item -s1
+
+'s'tring or 's'calar.
+Use string value as file content instead of file name.
+
+
+=item -z
+
+=item -z+
+
+=item -z1
+
+'z'ip, alias C<-p+>.
+
+
+
+=back
+
+
+=head1 REMOTE SOURCE EXPANSION
+
+=over
+
+=item REMOTE SOURCE EXPANSION
+
+Writing Perl as string constants is difficult in escaping.
+So, many methods accepts lists as arguments,
+and an array reference (delimited by '[' and ']') may be argument too.
+This array will be expanded to Perl and embedded within other arguments.
+
+The full syntax is:
+
+	[?command, ?-options, list of arguments]
+
+Where
+
+Command (optional) may be C<do{>, C<eval{>, C<system>, C<`>, see below.
+Default command is specified within individual C<METHODS>,
+default options (see C<METHOD CALL OPTIONS>) are inherited from method call.
+
+Default C<do{> is used within C<rcmd> and C<fget>.
+
+Default C<system(> is used within C<reval>.
+
+
+
+=item do{
+
+Evaluate Perl source within L<do|perlsyn>{}.
+
+
+
+=item eval{
+
+Evaluate Perl source within L<eval|perlsyn>{}.
+
+
+
+=item system(
+
+Execute command line via L<system|perlfunc> call.
+
+
+
+=item `
+
+Execute command line within L<`|perlop>L<`|perlop>.
+
+
+
+=back
+
+=head1 REMOTE EVALUATION ENVIRONMENT
+
+=over
+
+
+=item REMOTE EVALUATION ENVIRONMENT
+
+There are several variables available for remotely evaluated Perl.
+
+
+=item $ENV{SMELEM}
+
+Computer name, for compatibility with 
+L<Sys::Manage::Cmd|Sys/Manage/Cmd> command line embedding.
+
+
+=item $m_
+
+IO::Socket::INET object, connected to C<-agent>
+
+
+=item $r_
+
+Current value evaluated, current return value.
+
+
+=item $t_
+
+Temporary file name, alike C<-tmp>.
+
+
+=item OLDERR
+
+Saved STDERR file handle.
+
+
+=item OLDIN
+
+Saved STDIN file handle.
+
+
+=item OLDOUT
+
+Saved STDOUT file handle.
+
+
+=back
+
+
+=head1 VERSION
+
+=over
+
+=item  '2005-09-19'
+
+Started
+
+
+=back
+
+=head1 LICENSE
+
+This is free software; 
+you can use redistribute it and/or modify it 
+under the same terms as Perl itself.
+
+
+
+=head1 AUTHOR
+
+Andrew V Makarow <makarow at mail.com>, for block
+
+=cut
+

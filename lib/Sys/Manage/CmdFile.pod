@@ -1,0 +1,66 @@
+=head1 NAME
+
+Sys::Manage::CmdFile - Systems management commands file processor
+
+
+=head1 SYNOPSIS
+
+
+ use Sys::Manage::CmdFile;
+ Sys::Manage::CmdFile->dofile(script file, command file);
+ Sys::Manage::CmdFile->dofile(script file, command file => history file);
+ Sys::Manage::CmdFile->dofile('bin/smcmv.pl', 'var-test/soon-do' => 'soon-done');
+ Sys::Manage::CmdFile->dofile(sub{}(row),...)
+
+
+=head1 DESCRIPTION
+
+See C<dofile> method below.
+
+=over
+
+
+=item new () -> new object
+
+Creates a new object.
+
+
+=item dofile (script file, command file)
+
+=item dofile (script file, command file => history file)
+
+=item dofile (script file, command file, ? history file, ? redirect log file)
+
+=item dofile (sub{}(command row, redirect log file),...)
+
+Proceeds text file interpreting rows as script commands 
+and moving rows proceeded to history file if given.
+
+Script and command file name may be relative to $0 directory,
+as in L<Sys::Manage::Cmd|Sys/Manage/Cmd> environment.
+History or redirect file name may be relative to the command file directory.
+
+'$_' contains command row with redirection been evaluating.
+
+
+=item $ENV{SMCFP}
+
+Name of the command file be processing, 
+may be used in L<Sys::Manage::Cmd|Sys/Manage/Cmd> script to verify permission.
+
+=back
+
+=head1 LICENSE
+
+This is free software; 
+you can use redistribute it and/or modify it 
+under the same terms as Perl itself.
+
+
+
+=head1 AUTHOR
+
+Andrew V Makarow <makarow at mail.com>, for yuri
+
+=cut
+
