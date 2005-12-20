@@ -31,8 +31,8 @@ $s->set(-reject=>sub{
 			&& ($_[0]->{-ckind} eq 'cmd');
 	}
 	elsif ($ENV{SMCFP} =~/\bOperator\b/i) {
-		$_[0]->set(-k=>($ENV{SMCFP} =~/(assign)/ ? "oTE-$1" : 'oTE-cmd'));
-		return('illegal target') if !$_[0]->istarget('irkcpdc');
+		$_[0]->set(-k=>($ENV{SMCFP} =~/(assign)/ ? "operator-$1" : 'operator-cmd'));
+		return('illegal target') if !$_[0]->istarget('operator');
 		return('illegal script') if !$_[0]->isscript();
 	}
 	else {

@@ -52,15 +52,18 @@ Sys::Manage::Conn - Connection to remote Perl
 	other-args (using '-e' or '-exec=>1'; '?' - optional):
 
 		rcmd	?-'o-e-		os-command	argumets-list
+		lcmd	?-		os-command	argumets-list
 		rdo	?-o-e-p		?os-command !	local-script	?args
 		fget	?-'mp		remote-source	local-target
 		fput	?-'mp		local-source	remote-target
+		agtfile	?-l		agent-script
 
 		where:
 			-'	quote remote arg with "'"
 			-o-	refuse STDOUT
 			-e-	refuse STDERR
 			-p, -z	pack file(s)
+			-l	loop agent script
 			-m	move file(s)
 
 =back
@@ -128,7 +131,12 @@ Agent is a script file to be distributed and started on computers.
 
 Advantages: agent may be very complex.
 
-Disadvantages: agent distribution and manager authorization should be implemented.
+Disadvantages: agent distribution and manager authorization should be implemented,
+at least manager's IP address should be considered.
+
+Note: C<agtfile> method below produces a simple separate agent file 
+may be used with C<-init> => ''.
+
 
 =back
 
@@ -427,6 +435,12 @@ The main methods are C<new>, C<connect>,
 C<reval>, C<rcmd>, C<fput>, C<fget>, C<rdo>.
 
 
+=item agtfile (?-options, target file) -> success
+
+Writes separate agent script file to be used with C<-init> => ''.
+
+Used C<METHOD CALL OPTIONS>: C<-'>, C<-l>.
+
 
 =item connect (-option=>value,...) -> self
 
@@ -633,6 +647,7 @@ without additional '-' signs.
 =item -"
 
 Quoting for string arguments to embed into Perl source.
+To use on agent side only.
 Default is '"'.
 
 
@@ -661,6 +676,14 @@ Remain remote STDERR unredirected.
 
 'e'xecution separator.
 Command line mark-up sign.
+
+
+=item -l
+
+=item -l+
+
+'l'oop.
+Start agent script file from C<agtfile>.
 
 
 =item -m
@@ -822,6 +845,17 @@ Saved STDOUT file handle.
 =head1 VERSION
 
 =over
+
+=item '2005-12-02'
+
+New C<agtfile> method and command.
+New C<lcmd> command.
+
+
+=item '2005-11-25'
+
+Published 0.50 version.
+
 
 =item  '2005-09-19'
 

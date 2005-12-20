@@ -47,16 +47,29 @@ Sys::Manage::Cmd - Systems management command volley
 	-rCommandId	- redo command id (used also inside '-l'); or switch (for '-a')
 	-aAssignName	- assignment name, to use as command id
 	-lPauseSecs	- loop with pause before each subsequent redo
-	-o(s|c|b)	- order of execution: 
+	-lg...		- ... for pings usuccessful only
+	-lv, -lw...	- ... console 'v'erbose or 'w'indowed subsequent turns
+	-o(s|c|b)	- order of execution:
 				's'equental
 				'c'oncurrent
 				'b'ranched (concurrent branches)
 	-tTargetName	- target, may be several '-t', instead of positional argument
 	-xTargetExcl	- exclusion from target list, may be several '-x'
-	-g		- if ping, or -gPingTimeout
+	-uUser:pswd	- user name and password for target
+	-g		- ping target before command, also use -gPingTimeout
+	-gx		- exclude unsuccessful targets sequentially
 	-i		- ignore exit code
 	-v(0|1|2)	- verbosity level
-	-vt		- verbosity including date-time
+	-vc...		- ... cmdfile rows include
+	-vt...		- ... date-time include
+
+=item Embedded commands
+
+	script.ext	- interpreting of scripts alike '.pl', '.bat', '.ftp', '.rdo.*'
+	rcmd, rdo,	- commands to remote nodes
+	fput, fget		using Sys::Manage::Conn
+	cmdfile		- evaluate command lines file or Perl script
+	!elem!, <	- target element and source file substitutions
 
 
 =item Examples of command line
@@ -69,10 +82,16 @@ Sys::Manage::Cmd - Systems management command volley
 
 =item Embedding command line
 
-	if (!$ENV{SMELEM}) {	# command volley:
+	if (!defined($ENV{SMELEM})	# command volley:
+	|| ($ENV{SMELEM} eq '')) {
 		system($^X, 'script', '-k0', 'target', $0)
-	} else {		# command script:
+	} elsif (!$ENV{SMDIR}) {
+		die "Execute this script on Manager!"
+	} elsif ($ENV{SMDIR}) {
+		die "Execute this script on Agent!"
+	} else {			# command script:
 		....
+		1			# success
 	}
 
 =back
@@ -123,47 +142,68 @@ This is useful at least when reading and autotruncating logs.
 
 The identifiers are an unique strings automatically sequentially generated.
 This is useful for ordinary periodical or operator initiated commands.
+
 Given by operator assignment names may be used instead of automatically 
 generated identifiers.
 Autotruncation of log file system is missed when using assignment name.
+
 [C<-cassign>, C<-credo>, C<ENVIRONMENT>]
 
-=item Loops, Redoes, Assignments, Ping
+
+=item Loops, Redoes, Assignments, Ping, Sequence
 
 Loop is a periodical restart of command until success for all targets.
+
 Redo is a single reexecution of command into existing command identifier
 for all unsuccessful or not affected targets.
-Assignment is a single (re)execution of command for all not affected targets.
+
+Assignment is a single (re)execution of command for all targets not affected.
+
 Redo is used inside Loop and may be used separately.
 Loop may be used with Assignment, 
 but may be better to write a special script for assignments and schedule it.
 Redo switch may be used with Assignment to extend command execution 
 to unsuccessful targets.
+
 Ping switch may be used with Assignment to avoid error registrations
 for hosts inaccessible.
-[C<-cassign> and C<-ping>, C<-credo>, C<-cloop>]
+
+Sequential unsuccessful targets exclusion may be useful 
+as conditional processing targets of sequential commands.
+
+[C<-cassign> and C<-ping>, C<-credo>, C<-cloop>, C<-vgxi>]
+
 
 =item Targets
 
 Target collections are named lists of elements to be expanded until target elements.
 Target collections or target elements are used to execute command line given 
 for each target element.
+
 There are no assumptions on the nature of target (i.e. computer, daemon, user...).
 Only the name of the target element ('!elem!') may be substituted 
 into command line (see C<-cline> for other substitutions possible).
+
 Networked features, except C<-ping>, are a subject for a separate script(s) or module(s),
 i.e. L<Sys::Manage::Conn|Sys/Manage/Conn> via C<-assoc>.
+
 [C<-cline>, C<-ctarget>, C<-cxtgt>, C<-target>]
+
 
 =item Branches of targets
 
 Sequential execution of commands may be too long.
+
 Concurrent execution may be too exacting in system resources or telecommunications.
+
 So, branched execution implemented as
 concurrently executed branches with sequentially executed target elements.
+
 Target collections are named lists of elements to be expanded until target elements
 using target collections.
+
 [C<-branch>, C<-corder>]
+
 
 =item Script associations
 
@@ -172,7 +212,10 @@ When targets are already described, a command line should be simplest for real i
 I.e. 'volley Collection SomeScript.pl' may be typed instead of 'perl SomeScript.pl'.
 But this is also way for unusual scripts, like ftp.
 A last but one command line element '<' results in opening the last element as input stream for command.
+
 [C<-assoc>]
+
+
 
 =back
 
@@ -193,10 +236,14 @@ Associations for commands.
 Association may be command name, file name or file name extension.
 
 See source code for predefinitions and examples.
+
 Consider L<Sys::Manage::Conn|Sys/Manage/Conn> commands in the source code:
 'rcmd' and 'lcmd',
 'rdo' and 'ldo' (and script file names matching /\.(rdo|rdo)(?:\.\w+){0,1}$/i),
 'fput', 'fget'.
+
+Consider 'C<cmdfile>' embedded command 
+to evaluate L<Sys::Manage::CmdFile|Sys/Manage/CmdFile> or Perl script file by this script.
 
 See also C<-cline>.
 
@@ -301,7 +348,7 @@ C<-dirb>/lib-C<-ckind>, C<-dirb>/lib, C<-dirb>/bin paths tried.
 
 B<String substitutions> (see also C<-vsml>, C<-vsmr>, C<ENVIRONMENT>):
 
-!elem! - element name, also !host! and !node! may be used.
+!elem! - element name, also may be used !target!, !host! and !node!.
 
 !log! - log filesystem name.
 
@@ -322,11 +369,13 @@ B<Special commands> (in C<-assoc> syntax):
 
 ['-e', 'perl code',...] - execute via '$^X -e'.
 
+['C<cmdfile>', command file, ? history file, ? redirect log file] - evaluate L<Sys::Manage::CmdFile|Sys/Manage/CmdFile> or Perl script file by this script.
+
 
 B<L<Sys::Manage::Conn|Sys/Manage/Conn> commands> (implemented via C<-assoc>):
 'rcmd' and 'lcmd', 
 'rdo' and 'ldo' (and script file names matching /\.(ldo|rdo)(?:\.\w+){0,1}$/i), 
-'fput', 'fget'
+'fput', 'fget'.
 
 
 B<Quoting or escaping of command line arguments>: 
@@ -350,10 +399,24 @@ L<Sys::Manage::Conn::rdo|Sys/Manage/Conn> returns result of the script or !($?>>
 
 =item -l
 
-	=> false | seconds to pause
+	=> false | seconds to pause | .'g' | .'v' | .'w'
+
+=item -lg
+
+=item -lv
+
+=item -lw
 
 Loop (cyclical execution until success) requirement and pause size 
 for subsequent turns.
+
+The general behaviour is full redo of all unsuccessful target elements.
+Marked with 'g' character ping behaviour involves only targets previously missed or unreachable.
+
+Subsequent turns of loop may be 'v'erbose to current console for testing
+or opened in a new console 'w'indow. 
+These behaviours are very dependent on platform.
+
 
 
 =item -cpause
@@ -371,6 +434,12 @@ Used internally in C<-cloop> processing.
 =item -o
 
 	=> 's' | 'c' | 'b'
+
+=item -ob
+
+=item -oc
+
+=item -os
 
 Command execution order:
 
@@ -398,6 +467,17 @@ Used also in C<-cloop> processing.
 
 Command target(s).
 Will be expanded using C<-target>.
+
+
+=item -cuser
+
+=item -u
+
+	=> false | 'user:password' | 'user'
+
+Command login username and password for C<-ctarget>.
+May be used instead of C<-user> and C<-pswd>.
+
 
 
 =item -cxtgt
@@ -449,18 +529,18 @@ slot to obtain names and values.
 
 =item -v
 
-	=> 2 | 0
+	=> 2 | 1 | 0 | .'c' | .'t'
 
-Echo printout level, verbosity level.
-
-
-=item -echot
+=item -vc
 
 =item -vt
 
-	=> false | true
+Echo printout level, verbosity level. 
+Digital level may be supplied with character switches:
 
-Including date-time with echo printout, may be useful redirecting STDOUT.
+	'c' - echo each command executing within 'cmdfile';
+	't' - include date-time to STDOUT, useful when redirecting.
+
 
 
 =item -log
@@ -526,7 +606,7 @@ See also C<-user>.
 
 Commands reject condition.
 May be useful supplying service to suboperators 
-through L<Sys::Manage::CmdFile|Sys/Manage/CmdFile> or C<cmdfile>.
+through L<Sys::Manage::CmdFile|Sys/Manage/CmdFile>.
 
 L<$ENV{SMCFP}|Sys/Manage/CmdFile>, C<istarget>, C<isscript> may be mentioned in conditions.
 
@@ -564,6 +644,20 @@ User name discoverer for C<-cline> substitutions.
 See also C<-pswd>.
 
 
+
+=item -vgxi
+
+=item -gx
+
+	=> true | false
+
+Initiation of excluding unsuccessful targets flow.
+Temporary variables file will be used to accumulate and exclude 
+unsuccessful target elements on each sequent C<execute>.
+May be useful for script with several C<execute> calls, 
+or C<-cline> => 'C<cmdfile>'.
+
+
 =item -vsml
 
 =item -vsmr
@@ -572,6 +666,7 @@ See also C<-pswd>.
 
 Left and right substitution marks for command line.
 See also C<-cline>.
+
 
 
 =back
@@ -585,20 +680,20 @@ See also C<-cline>.
 =item METHODS
 
 
+=item cmd (C<execute> args) -> success
 
-=item cmdfile (script file, command file)
+Executes command volley given by arguments:
+clears description of the last command (excluding C<-ckind> and C<-corder>)
+and calls C<execute> with arguments given.
 
-=item cmdfile (script file, command file => history file)
+May be useful inside scripts with multiple commands.
 
-=item cmdfile (script file, command file, ? history file, ? redirect log file)
 
-=item cmdfile (sub{}(command row, redirect log file),...)
 
-Proceeds text file interpreting rows as script commands
-and moving rows proceeded to history file if given.
+=item daemonize ()
 
-This is an utility method from L<Sys::Manage::CmdFile|Sys/Manage/CmdFile>
-may be useful sometimes.
+Suppresses STDIN, STDOUT, STDERR and calls L<setsid|POSIX>.
+See L<perlipc|perlipc>.
 
 
 
@@ -606,9 +701,12 @@ may be useful sometimes.
 
 =item execute ([command line arguments],-option=>value,...) -> success
 
-Executes C<-cline> for each C<-ctarget> expanded using C<-target> and C<-cxtgt>.
+Executes C<-cline>
+for each C<-ctarget> expanded using C<-target> and C<-cxtgt>,
+according to values of all other C<SLOTS>.
 
 Fundamental result method.
+
 
 
 =item isscript (?'lib') -> exists?
@@ -702,9 +800,43 @@ $ENV{SMUSER}	- target element user.
 
 =over
 
+
+=item '2005-12-18'
+
+New C<-lg>, C<-lv>, C<-lw> options.
+
+New C<daemonize> method.
+
+
+=item '2005-12-14'
+
+New C<cmd> method may be useful inside scripts with multiple commands.
+
+New C<-u> option for command login username and password.
+
+New C<-vc> option to echo 'C<cmdfile>' commands separate from C<-echo> level.
+
+
+=item '2005-12-09'
+
+New C<-gx> switch to process targets of sequential commands conditionally.
+
+
+=item '2005-11-26'
+
+New 'C<cmdfile>' predefined command, see C<-cline>.
+
+Improvement of C<vload>.
+
+
+=item '2005-11-25'
+
+Published 0.50 version.
+
+
 =item '2005-09-09'
 
-Started
+Started.
 
 
 =back

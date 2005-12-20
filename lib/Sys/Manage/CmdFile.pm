@@ -16,7 +16,7 @@ use IO::File;
 use Fcntl qw(:DEFAULT :flock :seek :mode);
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.50';
+$VERSION = '0.51';
 
 1;
 
@@ -36,6 +36,7 @@ sub new {		# Create new object
 sub initialize {	# Initialize newly created object
  my $s =shift;		# ( ? [command line], ? -option=>value,...)	-> self
  %$s =(
+	# -dofck => undef
 	%$s);
  $s->set(@_);
  $s
@@ -70,7 +71,9 @@ sub strtime {		# Log time formatter
 
 
 sub qclad {		# Quote command line arg(s) on demand
-	map {	/[&<>\[\]{}^=;!'+,`~\s%"?*|()]/	# ??? see shell
+	map {	!defined($_) || ($_ eq '')
+		? '""'
+		: /[&<>\[\]{}^=;!'+,`~\s%"?*|()]/	# ??? see shell
 		? do {	my $v =$_; $v =~s/"/\\"/g; '"' .$v .'"' }
 		: $_ } @_[1..$#_]
 }
@@ -95,7 +98,7 @@ sub iofopen {		# File open
 
 
 sub dofile {		# Command queue
-			# (script||sub{}, comfile, ?tgtfile, ?rdrfile) -> self
+			# (script||sub{}, comfile, ?tgtfile, ?rdrfile) -> success
  my ($s,$fqp,$fqi,$fql,$fqr) =@_;
  my ($dqb, $dqm);
  $s   =Sys::Manage::CmdFile->new() if !ref($s);
@@ -109,7 +112,7 @@ sub dofile {		# Command queue
 	: '.';
  $dqb =scalar(Win32::GetFullPathName($dqb))
 	if $dqb && ($^O eq 'MSWin32');
- local $ENV{SMCFP} =$fqi;
+ local $ENV{SMCFP} =$s->{-dofck} ? '' : $fqi;
  $fqi =$dqb .$dqm .$fqi
 	if $dqb && $fqi && ($fqi =~/[\\\/][^\\\/]+$/ ? $` && (!-d $`) : 1);
  $fqi =scalar(Win32::GetFullPathName($fqi))
@@ -119,7 +122,7 @@ sub dofile {		# Command queue
 	$hqi->print("# '",(ref($fqp) ? $0 : $fqp)
 		, "' incoming command lines"
 		,($fql ? " queue.\n" : " file.\n")
-		,"Contains command lines to be executed" 
+		,"# Contains command lines to be executed" 
 		,($fql ? " and shifted to '$fql'.\n" : ".\n")
 		,"# Syntax:\n"
 		,"#\t# - comment row\n"
@@ -146,13 +149,14 @@ sub dofile {		# Command queue
 	$hql->close()
  }
  my $fqt =''; # $fqi .'.tmp'; # ??? restore procedure ???
+ my $erc ='';
  if ($fqt
  && (-e $fqt)
  && (((-s $fqt)||0) > ((-s $fqi) ||0))) {
 	rename($fqt, $fqi)
  }
  while (1) {
-	my $hql =$fql && $s->iofopen('>>' .$fql);
+	my $hql =!$s->{-dofck} && $fql && $s->iofopen('>>' .$fql);
 	my $hqi =$s->iofopen('+<' .$fqi); flock($hqi, LOCK_SH);
 	my $row ='';
 	my $pos =0;
@@ -162,26 +166,43 @@ sub dofile {		# Command queue
 			next;
 		}
 		if (!$run || !$hql) {
-			print '$$',$$,' ',$row,"\n";
 			$run =$row;
 			$run =$` if $run =~/[\r\n\s]+$/;
-			local $_ =$run;
 			if ($hql) {
 				$hql->print($s->strtime(),' $$',$$,"\t",$run,"\n");
 				$hql->flush();
+				if (!$fqr && $fql && 0) {
+					$hql->close(); $hql =undef;
+				}
 			}
-			$_ =$run 
-				.($fqr 
-				? join('', ' >>', $s->qclad($fqr),' 2>>&1')
-				: $fql
-				? join('', ' 2>>', $s->qclad($fql))
-				: '');
+			if ($s->{-dofck}) {
+				$hql->close() if $hql; $hql =undef;
+				$hqi->close() if $hqi; $hqi =undef;
+			}
+			my $err =0;
+			local $_=$s->{-dofck}
+				? (join('',$s->qclad($fqi))
+				  .($fql && join('',' ',$s->qclad($fql)) ||'')
+				  .($fqr && join('',' >>',$s->qclad($fqr),' 2>>&1') ||''))
+				: ($run
+				  .($fqr 
+				  ? join('', ' >>', $s->qclad($fqr),' 2>>&1')
+				  : $fql && 0	# !!! share violation
+				  ? join('', ' 2>>', $s->qclad($fql))
+				  : ''));
 			if (ref($fqp)
-				&& !eval{&$fqp($run,$fqr);1}) {
-				$hql->print($s->strtime(),' $$',$$,"\terror: ",$@,"\n")
-					if $hql;
+			&& !eval{&$fqp(	  $s->{-dofck}
+					? ($fqi
+					  ,($fql ? $fql : !$fqr ? () : '')
+					  ,($fqr ? $fqr : ()))
+					: ($run,$fqr)); 1}) {
+				$err =$@;
 			}
-			elsif (!ref($fqp)) {
+			elsif (!ref($fqp) && ($s->{-dofck} ? $fqp : 1)) {
+				print('$$', $$, ' ', ($fqp ? $fqp .' ' : '')
+					, $_, ' (' ,$fqi, ")\n")
+					if !$s->{-dofck};
+				$err =
 				system( ( !$fqp
 					? ''
 					: $fqp =~/\.(?:pl|p)$/ 
@@ -189,15 +210,23 @@ sub dofile {		# Command queue
 					: $fqp =~/\.(?:bat|cmd)$/ 
 					? "cmd /c $fqp "
 					: "$fqp ")
-					.$run 
-					.($fqr 
-					? join('', ' >>', $s->qclad($fqr),' 2>>&1')
-					: $fql
-					? join('', ' 2>>', $s->qclad($fql))
-					: ''));
-				$hql->print($s->strtime(),' $$',$$,"\terror: ",($?>>8),"\n")
-					if $hql && ($?>>8);
+					.$_);
+				$err =$! if $err ==-1;
+				$err =$?>>8;
 			}
+
+			return(!$err)
+				if $s->{-dofck};
+
+			$hql =$s->iofopen('>>' .$fql)
+				if !$hql && $fql;
+			
+			$hql->print($s->strtime(),' $$',$$,"\terror: $err\n")
+				if $hql && $err;
+
+			$erc =($erc||0 +1)
+				if $err;
+
 			if ($hql) {
 				my $po1 =tell($hqi);
 				my $buf;
@@ -213,11 +242,12 @@ sub dofile {		# Command queue
 				&& ((tell($hqi)||0)==$po1)
 				&& ($row eq $run)) {
 					if ($fqt) {
-						my $hqt =$s->iofopen('>' .$fqt);
-						seek($hqi,0,0) 
+						my $hqt =$s->iofopen('>' .$fqt .'.tmp');
+						seek($hqi,0,0)
 						&& defined(read($hqi, $buf, -s $hqi))
 						&& $hqt->print($buf);
 						$hqt->close();
+						rename($fqt .'.tmp', $fqt);
 					}
 					seek($hqi,$po1,0)
 					&& defined(read($hqi, $buf, -s $hqi))
@@ -242,6 +272,13 @@ sub dofile {		# Command queue
 	$hql->close() if $hql;
 	last if !$run || !$hql;
  }
- $s
+ !$erc
 }
 
+
+sub dofck {		# Command queue check / run
+ my $s =shift;		# (script||sub{}||undef, comfile,...) -> success
+    $s =Sys::Manage::CmdFile->new() if !ref($s);
+ local $s->{-dofck} =1;
+ $s->dofile(@_)
+}

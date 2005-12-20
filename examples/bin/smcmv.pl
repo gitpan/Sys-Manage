@@ -17,16 +17,25 @@
 #	-rCommandId	- redo command id (used also inside '-l'); or switch (for '-a')
 #	-aAssignName	- assignment name, to use as command id
 #	-lPauseSecs	- loop with pause before each subsequent redo
+#	-lg...		- ... for pings usuccessful only
+#	-lv, -lw...	- ... console 'v'erbose or 'w'indowed subsequent turns
 #	-o(s|c|b)	- order of execution: 
 #				's'equental
 #				'c'oncurrent
 #				'b'ranched (concurrent branches)
 #	-tTargetName	- target, may be several '-t', instead of positional argument
 #	-xTargetExcl	- exclusion from target list, may be several '-x'
-#	-g              - if ping, or -gPingTimeout
+#	-uUser:pswd	- user name and password for target
+#	-g		- ping target before command, also use -gPingTimeout
+#	-gx		- exclude unsuccessful targets sequentially
 #	-i		- ignore exit code
 #	-v(0|1|2)	- verbosity level
-#	-vt		- verbosity including date-time
+#	-vc...		- ... cmdfile rows include
+#	-vt...		- ... date-time include
+#
+# Predefined commands:
+#	see 'smrmt' script: 'rcmd', 'rdo', 'fput', 'fget' with options.
+#	see 'cmdfile'.
 #
 use Sys::Manage::Cmd;
 $s =Sys::Manage::Cmd->new(-cfg=>1);

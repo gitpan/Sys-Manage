@@ -2,9 +2,8 @@
 #
 # Sample 'rdo' script
 #
-if (!$ENV{SMELEM}) {
-	system('cmd','/c',"$0\\..\\..\\bin\\smcmv.bat"
-		,"-k0",'0','rdo',$0)
+if (!defined($ENV{SMELEM}) ||($ENV{SMELEM} eq '')) {
+	system($^X, "$0\\..\\..\\bin\\smcmv.p", "-k0", '0', $0)
 }
 elsif ($ENV{SMDIR}) {
 	die "Execute this script on Agent!"

@@ -26,6 +26,23 @@ under the same terms as Perl itself.
 =over
 
 
+=item '2005-12-20'
+
+Publishing 0.51 version.
+
+L<Sys::Manage::Cmd|Sys/Manage/Cmd>: 
+new C<cmdfile> predefined command;
+C<cmd> and C<daemonize> methods;
+C<-gx> and C<-u> options;
+C<-vc>, C<-vt>, C<-lg>, C<-lv>, C<-lw> options extensions.
+
+L<Sys::Manage::Conn|Sys/Manage/Conn>:
+new C<agtfile> and C<lcmd> methods and commands.
+
+L<Sys::Manage::Schedule|Sys/Manage/Schedule>:
+new C<cmdfck> method.
+
+
 =item '2005-11-25'
 
 Publishing 0.50 version.

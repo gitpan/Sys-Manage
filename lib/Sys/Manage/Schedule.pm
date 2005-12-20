@@ -5,9 +5,11 @@
 # makarow, 2005-09-15
 #
 # !!! see in source code
-# !!! chpswd may fail?
+# ??? qclad(@_) inside 'cmdfck'?
+# !!! 'soon' multiplatform
+# !!! 'chpswd' may fail?
 #	Platform SDK: Directory Services: Changing the Password on a Service's User Account
-# ??? -surun may be interrupted by system down or another -surun
+# ??? '-surun' may be interrupted by system down or another -surun
 #
 
 package Sys::Manage::Schedule;
@@ -16,7 +18,7 @@ use strict;
 use Carp;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.50';
+$VERSION = '0.51';
 
 1;
 
@@ -96,6 +98,26 @@ sub class {
 }
 
 
+sub daemonize {		# Daemonize process
+ my $s =$_[0];
+ my $null =$^O eq 'MSWin32' ? 'nul' : '/dev/null';
+ open(STDIN,  "$null")  || return($s->echologdie("daemonize(STDIN) -> $!")); 
+ open(STDOUT,">$null")  || return($s->echologdie("daemonize(STDOUT) -> $!"));
+ eval("use POSIX 'setsid'; setsid()");
+ open(STDERR,'>&STDOUT')|| return($s->echologdie("daemonize(STDERR) -> $!"));
+ $s
+}
+
+
+sub DESTROY {
+ my $s =$_[0];
+ if($s->{-crontab}) {
+	$s->vfwrite('>crontab.txt',@{$s->{-crontab}});
+	$s->run('crontab',$s->vfname('crontab.txt'));
+ }
+}
+
+
 sub set {               # Get/set slots of object
 			# ()		-> options
 			# (-option)	-> value
@@ -114,14 +136,6 @@ sub set {               # Get/set slots of object
 }
 
 
-sub DESTROY {
- my $s =$_[0];
- if($s->{-crontab}) {
-	$s->vfwrite('>crontab.txt',@{$s->{-crontab}});
-	$s->run('crontab',$s->vfname('crontab.txt'));
- }
-}
-
 
 sub max {		# Max number
  (($_[1]||0) >($_[2]||0) ? $_[1] : $_[2])||0
@@ -133,6 +147,15 @@ sub strtime {		# Log time formatter
 	 join('-', $t[5]+1900, map {length($_)<2 ? "0$_" : $_} $t[4]+1,$t[3]) 
 	.' ' 
 	.join(':', map {length($_)<2 ? "0$_" : $_} $t[2],$t[1],$t[0])
+}
+
+
+sub qclad {		# Quote command line arg(s) on demand
+	map {	!defined($_) || ($_ eq '')
+		? '""'
+		: /[&<>\[\]{}^=;!'+,`~\s%"?*|()]/	# ??? see shell
+		? do {	my $v =$_; $v =~s/"/\\"/g; '"' .$v .'"' }
+		: $_ } @_[1..$#_]
 }
 
 
@@ -182,6 +205,23 @@ sub fopen {		# File open
  my ($s,$f) =@_;	# (file name) -> file handle
  eval('use IO::File');
  IO::File->new($f) || $s->echologdie("Error '$!' (fopen,'$f')");
+}
+
+
+sub copen {		# Command output open
+ my $s =$_[0];		# (handle var, command,...) -> pid
+ my $p;
+ if (0) {
+	$_[1] =eval('use IO::File; IO::File->new()');
+	$p =open($_[1], '-|', join(' ', @_[2..$#_]) .' 2>>&1');
+ }
+ else {
+	eval('use IPC::Open3');
+	my $x;
+	$p =eval{IPC::Open3::open3($x, $_[1], $_[1], @_[2..$#_])};
+	eval{fileno($x) && close($x)};
+ }
+ $p
 }
 
 
@@ -356,10 +396,9 @@ sub run {	# Start OS command
 sub runopen {	# Open OS command as filehandle
  my $s =$_[0];	# (command) -> file handle
  $s->printflush(join(' ',@_[1..$#_]),"\n");
- eval('use IPC::Open3');
- my($ho,$h);
+ my $h;
  $!=$^E=0;
- $s->{-runopen} =eval{IPC::Open3::open3($ho, $h, $h, @_[1..$#_])};
+ $s->{-runopen} =$s->copen($h, @_[1..$#_]);
  $s->{-runopen} && $h;
 }
 
@@ -396,14 +435,12 @@ sub runlog {	# Log os command execution
  my $s =shift;	# (command) -> success
  $s->loglck(1);  
  $s->logrdr(0) if !$s->{-wrlog};
- eval('use IPC::Open3');
- my $hi;
- my $ho;
  $s->echolog(join(' ',@_));
  $!=$^E=0;
- my $pid =eval{IPC::Open3::open3($ho, $hi, $hi, @_)};
+ my $hi;
+ my $pid =$s->copen($hi, @_);
  if ($pid) {
-	$s->{-wrlog}->print($s->strtime(), ' $$', $$, ' (', join(' ',@_), ")\n");
+	$s->{-wrlog}->print($s->strtime(), ' $$', $pid, ' (', join(' ',@_), ")\n");
 	$s->{-wrlog}->flush();
 	my $r =undef;
 	while(defined($r=readline($hi))) {
@@ -411,7 +448,6 @@ sub runlog {	# Log os command execution
 		print($r, "\n");
 		$s->{-wrlog}->print($r, "\n");
 	}
-	$ho && close($ho);
 	$hi && close($hi);
 	waitpid($pid,0);
 	$s->{-wrlog}->print($s->strtime(), ' Exit ', ($?>>8),' (', join(' ',@_), ")\n");
@@ -421,7 +457,6 @@ sub runlog {	# Log os command execution
  }
  else { 
 	my @e =($!, $^E);
-	$ho && close($ho);
 	$hi && close($hi);
 	($!, $^E) =@e;
 	$s->{-wrlog}->print($s->strtime(), " Error '$!' (", join(' ',@_), ")\n");
@@ -439,7 +474,14 @@ sub cmdfile {	# Shift command file
 }
 
 
-sub w32oleerr {		# Win32 OLE error message
+sub cmdfck {	# Check command file
+ $_[0]->{-cmdfile} =eval('use Sys::Manage::CmdFile; Sys::Manage::CmdFile->new()')
+	if !$_[0]->{-cmdfile};
+ $_[0]->{-cmdfile}->dofck(@_[1..$#_])
+}
+
+
+sub w32oleerr {	# Win32 OLE error message
 	(Win32::OLE->LastError()||'undef') 
 	.' ' 
 	.(Win32::OLE->LastError() && Win32::FormatMessage(Win32::OLE->LastError()) ||'undef');
@@ -605,7 +647,7 @@ sub startup {	# Start schedule execution (internal)
 				,$s->{-susr}
 				,'-c','"' .join(' '
 					,$^X
-					,($s->{-prgfn} =~/\.(?:bat|cmd)$/i ? ('-x','-S') : ())
+					,($s->{-prgfn} =~/\.(?:bat|cmd)$/i ? ('-x') : ())
 					,$s->{-prgfn}, '-runsu', $s->{-runarg})
 					.'"')
 			: $s->run(1
@@ -762,7 +804,7 @@ sub at_ {	# At... condition (implementation)
 			&& !$s->{-susr} && !$s->{-spsw}
 			&& !$s->w32svcr($s->{-prgsn});
 		$s->run('at', atarg($s, @_[2..$#_]), $^X
-			, ($s->{-prgfn} =~/\.(?:bat|cmd)$/i ? ('-x','-S') : ())
+			, ($s->{-prgfn} =~/\.(?:bat|cmd)$/i ? ('-x') : ())
 			, $s->{-prgfn}
 			, $o =~/s/ ? '-surun' : '-run'
 			, atesc($s, atarg($s, @_[2..$#_])))
@@ -870,7 +912,7 @@ sub soon {	# Cyclical starting sub{}
 		my @c =('at',$t1[2] .':' .$t1[1]
 			,($o =~/i/ ? ('/interactive') : ())
 			,$^X
-			,($s->{-prgfn} =~/\.(?:bat|cmd)$/i ? ('-x','-S') : ())
+			,($s->{-prgfn} =~/\.(?:bat|cmd)$/i ? ('-x') : ())
 			,$s->{-prgfn}
 			,$o =~/s/ ? '-surun' : '-run'
 			,$n);

@@ -15,7 +15,7 @@ Sys::Manage::CmdFile - Systems management commands file processor
 
 =head1 DESCRIPTION
 
-See C<dofile> method below.
+See C<dofile> and C<dofck> methods below.
 
 =over
 
@@ -25,28 +25,37 @@ See C<dofile> method below.
 Creates a new object.
 
 
-=item dofile (script file, command file)
 
-=item dofile (script file, command file => history file)
+=item dofck (C<dofile> args)
 
-=item dofile (script file, command file, ? history file, ? redirect log file)
+=item dofck (sub{}(commands file, ? history file, ? redirect log file),...)
+
+Checks C<dofile> commands file for command rows present.
+If commands found, executes script or sub{} given once, for file names.
+
+'$_' for sub{} contains file names and redirection.
+
+
+
+=item dofile (? script file || false, commands file, ? history file || false, ? redirect log file || false)
 
 =item dofile (sub{}(command row, redirect log file),...)
 
-Proceeds text file interpreting rows as script commands 
+Processes text file interpreting rows as script command lines
 and moving rows proceeded to history file if given.
 
-Script and command file name may be relative to $0 directory,
-as in L<Sys::Manage::Cmd|Sys/Manage/Cmd> environment.
-History or redirect file name may be relative to the command file directory.
+Command file name may be relative to script directory.
+History and redirect file names may be relative to the command file directory.
 
-'$_' contains command row with redirection been evaluating.
+'$_' for sub{} contains command row and redirection been evaluating.
+
 
 
 =item $ENV{SMCFP}
 
 Name of the command file be processing, 
 may be used in L<Sys::Manage::Cmd|Sys/Manage/Cmd> script to verify permission.
+
 
 =back
 

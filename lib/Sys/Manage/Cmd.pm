@@ -4,9 +4,10 @@
 #
 # makarow, 2005-09-09
 #
-# !!! see in source code
-# ??? eject logfiles?
-# 
+# !!! ??? see in source code.
+# ??? switch on var files fault tolerance?
+# ??? ejecting logfiles?
+#
 
 package Sys::Manage::Cmd;
 require 5.000;
@@ -15,10 +16,11 @@ use UNIVERSAL;
 use Carp;
 use IO::File;
 use Fcntl qw(:DEFAULT :flock :seek :mode);
+use POSIX qw(:sys_wait_h);
 use Data::Dumper;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.50';
+$VERSION = '0.51';
 
 1;
 
@@ -57,8 +59,10 @@ sub initialize {	# Initialize newly created object
 			do{my $v =$s->class; $v=~s/::/-/g; $v}
 	#-config	=>undef			# config use, '-cfg' also
 	,-error		=>'die'			# error handler
-	,-echo		=>2		# -v	# echo verbosity level
-	#-echot		=>undef		# -vt	# echo time including
+
+	,-echo		=>2		# -v	# echo verbosity switches
+					# -vct	# ... commands, time including
+	,-echol		=>2		# -v#	# ... verbosity level
 	,-log		=>undef			# log file name
 	#-logh					# log file handler
 	,-logevt	=>undef			# log event trigger sub{}
@@ -89,17 +93,26 @@ sub initialize {	# Initialize newly created object
 				# ['-e' due to 'END{' | 'eval' reducing processes
 				# see 'execute': rdo fput fget
 			}
+
+	#-var		=>{}			# persistent variables
+	#-varh		=>undef			# persistent variables file handle
+	#-vgxi		=>undef		# -gx	# go-exclude init flag
+	#-vgxf		=>undef		#	# go-exclude file name
+	#-vgxv		=>undef			# go-exclude hash of targets
+
 	,-ckind		=>'cmd'		# -k	# cmd kind (namespace)
 	#-credo		=>''		# -r	# cmd redo id (also in -l) or switch (for -a)
 	#-cassign	=>''		# -a	# cmd assignment name (analogous -r)
 	#-cloop		=>60*10		# -l	# cmd loop (pause length)
-	#-cpause	=>-cloop	# -p	# cmd prestart pause (in -l)
+					# -lg -le		# pings/errs
+	#-cpause	=>undef		# -p	# cmd prestart pause (in -l)
 	,-corder	=>'s'		# -o	# cmd order = 's'equental
 								# 'c'oncurrent
 								# 'b'ranched
 	#-cbranch	=>undef		# -b	# cmd order branch name (in -o)
 	#-ctarget	=>'all'		# -t	# cmd target(s)
 	#-cxtgt		=>[]		# -x	# cmd target exclusions
+	#-cuser		=>undef		# -u	# cmd user:password
 	#-cignor	=>undef		# -i	# cmd exit code ignoring
 	,-cline		=>[]		# ...	# cmd line
 	#-cid		=>undef			# cmd result id
@@ -108,6 +121,23 @@ sub initialize {	# Initialize newly created object
 	);
  $s->set(@_);
  $s
+}
+
+
+sub daemonize {		# Daemonize process
+ my $s =$_[0];
+ my $null =$^O eq 'MSWin32' ? 'nul' : '/dev/null';
+ open(STDIN,  "$null")  || return($s->error("daemonize(STDIN) -> $!")); 
+ open(STDOUT,">$null")  || return($s->error("daemonize(STDOUT) -> $!"));
+ eval("use POSIX 'setsid'; setsid()");
+ open(STDERR,'>&STDOUT')|| return($s->error("daemonize(STDERR) -> $!"));
+ $s
+}
+
+
+sub DESTROY {
+ my $s =$_[0];
+ $s->vgxf('d') if $s->{-vgxi};
 }
 
 
@@ -149,9 +179,10 @@ sub set {               # Get/set slots of object
 		: $n eq '-i'	? '-cignor'
 		: $n eq '-t'	? '-ctarget'
 		: $n eq '-x'	? '-cxtgt'
+		: $n eq '-u'	? '-cuser'
 		: $n eq '-g'	? '-ping'
+		: $n eq '-gx'	? (!$v || ($v=~/^[\d\w]$/i) ? '-vgxi' : '-vgxf')
 		: $n eq '-v'	? '-echo'
-		: $n =~/^-vt/	? '-echot'
 		: $n;
 	delete $opt{$k};
 	$opt{$n} =$v
@@ -169,12 +200,14 @@ sub set {               # Get/set slots of object
 	elsif ($arg->[$i] =~/^-r(.+)$/i) {
 		$opt{-credo} =$1	if !exists $opt{-credo}
 	}
-	elsif ($arg->[$i] =~/^-l(\d*)$/i) {
-		$opt{-cloop} =$1||(60*10)
+	elsif ($arg->[$i] =~/^-l([\d\w]*)$/i) {
+		my $v =defined($1) && ($1 ne '') ? $1 : '';
+		   $v =$v .(60*10) if $v !~/\d/;
+		$opt{-cloop} =$v
 					if !exists $opt{-cloop}
 	}
 	elsif ($arg->[$i] =~/^-p(\d*)$/i) {
-		$opt{-cpause} =$1||$opt{-cloop}||(60*10)
+		$opt{-cpause} =$1||1
 					if !exists $opt{-cpause}
 	}
 	elsif ($arg->[$i] =~/^-o(.*)$/i) {
@@ -203,17 +236,27 @@ sub set {               # Get/set slots of object
 		? do{$opt{-cxtgt} =[$opt{-cxtgt},$v]}
 		: do{$opt{-cxtgt} =$v};
 	}
+	elsif ($arg->[$i] =~/^-u(.*)$/i) {
+		$opt{-cuser} =$1	if $1 && !exists $opt{-cuser}
+	}
 	elsif ($arg->[$i] =~/^-g(\d*)$/i) {
 		my $v =$1;
 		$opt{-ping} =1		if !(exists $opt{-ping}) && ($v ne '0');
 		$opt{-pingtime} =$v	if !(exists $opt{-pingtime})
 								&& $v && ($v >1);
 	}
+	elsif ($arg->[$i] =~/^-gx(.*)$/i) {
+		my $v =$1;
+		$opt{-vgxi} =1		if !$v && !exists($opt{-vgxi});
+		$opt{-vgxf} =$v		if $v  && ($v !~/^[\d\w]$/)
+					&& !exists($opt{-vgxf});
+	}
 	elsif ($arg->[$i] =~/^-v([\d\w]*)$/i) {
 		my $v =$1;
-		$opt{-echo} =$v	if !(exists $opt{-echo})  && ($v =~/^\d+$/);
-		$opt{-echo} =2	if !(exists $opt{-echo})  && ($v eq '');
-		$opt{-echot}=1	if !(exists $opt{-echot}) && ($v =~/^t/i);
+		   $v =''	if !defined($v);
+		   $v .=2	if $v !~/\d/;		
+		$opt{-echo} =$v	if !(exists $opt{-echo});
+		$opt{-echol}=$v =~/(\d+)/ ? $1 : 2;
 	}
 	elsif (exists($opt{-ctarget})) {
 		$opt{-cline} =[@$arg[$i..$#$arg]]; last;
@@ -224,6 +267,8 @@ sub set {               # Get/set slots of object
 	}
  }}
 
+ $opt{-echol} =$opt{-echo} =~/(\d+)/ ? $1 : 2
+		if $opt{-echo};
  $opt{-ckind} =	  !$opt{-cline}
 		? 'cmd'
 		: (  $^O eq 'MSWin32'
@@ -280,8 +325,9 @@ sub set {               # Get/set slots of object
 			}
 		: $s->error("bad '-logevt'=>" .$s->{-logevt});
  }
- $opt{-echo} =2 
-	if $opt{-echo} && (-echo ==1);
+ $opt{-vgxf} =($opt{-prgcn} ||$s->{-prgcn})
+	.'-' .time() .'-' .$$ .'-vgx.pl'
+	if $opt{-vgxi} && !$opt{-vgxf};
  foreach my $k (keys(%opt)) {
 	$s->{$k} =$opt{$k};
  }
@@ -304,14 +350,16 @@ sub qclad {		# Quote command line arg(s) on demand
 	map {	# Cmd: The following special characters require quotation marks:
 		# & < > [ ] { } ^ = ; ! ' + , ` ~ [white space]
 		# Shell: see execvp(3) - for args list processing
-		/[&<>\[\]{}^=;!'+,`~\s%"?*|()]/	# ??? see shell
+		!defined($_) || ($_ eq '')
+		? '""'
+		: /[&<>\[\]{}^=;!'+,`~\s%"?*|()]/	# ??? see shell
 		? do {	my $v =$_; $v =~s/"/\\"/g; '"' .$v .'"' }
 		: $_ } @_[1..$#_]
 }
 
 
 sub qclat {		# Quote command line arg(s) totally
-	map {	my $v =$_;
+	map {	my $v =defined($_) ? $_ : '';
 		$v =~s/"/\\"/g;
 		'"' .$v .'"'
 		} @_[1..$#_]
@@ -335,10 +383,10 @@ sub error {		# Error final
 
 
 sub echo {		# Echo message
- print	(($_[0]->{-echot} ? ($_[0]->strtime(), ' ') : ())
+ print	(($_[0]->{-echo} =~/t/ ? ($_[0]->strtime(), ' ') : ())
 	,'$$',($ENV{SMPID} && ($ENV{SMPID} ne $$) ? $ENV{SMPID} .',' : ''), $$
 	,' ',@_[1..$#_],"\n")
-	if $_[0]->{-echo};
+	if $_[0]->{-echol};
  $_[0]->echolog(@_[1..$#_]) if $_[0]->{-log};
 }
 
@@ -410,7 +458,7 @@ sub ping {		# Ping object
 		my $r =$_[0]->{-ping}->ping($_[1]);
 		return($r) if !defined($r) || $r;
 	}
-	return(0)
+	return(undef)
  }
  else {
 	return($_[0]->{-ping}->ping($_[1]))
@@ -439,6 +487,7 @@ sub vload {   		# Load common variables
  my ($s, $lck) =@_;	# (?LOCK_EX) -> {vars}
  return($s->{-var}) if $s->{-var} && !$lck;
  my $fn =$s->{-dirb} .$s->{-dirm} .'var' .$s->{-dirm} .$s->{-prgcn} .'-var.pl';
+ my $ft ='';	# $fn .'.tmp';	# ??? fault tolerance off
  my $hf;
  my $bf;
  if (!-f $fn) {
@@ -448,6 +497,7 @@ sub vload {   		# Load common variables
  if ($hf =IO::File->new('+<' .$fn)) {
 	flock($hf,$lck) if $lck;	# LOCK_EX/LOCK_SH
 	sysread($hf,$bf,-s $fn);
+	if ($ft && -f $ft) {$bf =$s->fload($ft)}
 	my $VAR1;
 	$s->{-var} =eval($bf);
 	!$lck && close($hf);
@@ -465,10 +515,11 @@ sub vload {   		# Load common variables
 sub vstore {		# Store common variables
  my $s  =shift;		# (? upd sub{}) -> {vars}
  my $fn =$s->{-dirb} .$s->{-dirm} .'var' .$s->{-dirm} .$s->{-prgcn} .'-var.pl';
+ my $ft ='';	# $fn .'.tmp';	# ??? fault tolerance off
  my $hf;
  if ($_[0]) {
 	if ($hf =$s->{-varh}) {
-		flock($hf, LOCK_UN);
+		flock($hf, LOCK_UN |LOCK_NB);
 		close($hf);
 		$s->{-varh} =undef;
 	}
@@ -489,16 +540,41 @@ sub vstore {		# Store common variables
 	$s->{-var} ={} if !$s->{-var};
 	my $o =Data::Dumper->new([$s->{-var}]); $o->Indent(1);
 	my $bf=$o->Dump();
-	truncate($hf,0);
-	seek($hf,0,0);
+	if ($ft) {$s->fstore($ft .'.tmp', $bf); rename($ft .'.tmp', $ft)};
+	sysseek($hf, 0, 0);
 	syswrite($hf,$bf) ne length($bf)
 	? return($s->error("cannot write '$fn': $!"))
 	: 1;
-	flock($hf,LOCK_UN);
+	truncate($hf,sysseek($hf, 0, 1));
+	flock($hf,LOCK_UN |LOCK_NB);
 	close($hf);
+	if ($ft) {unlink($ft)};
 	$s->{-varh} =undef;
  }
  $s->{-var};
+}
+
+
+sub vgxf {		# Control go-exclude targets file
+ my ($s,$o) =@_;	# ('l'|'s'|'d')
+ return(undef) if !$s->{-vgxf};
+ my $f =$s->{-dirb} .$s->{-dirm} .'var' .$s->{-dirm} .$s->{-vgxf};
+ if ($o eq 'l') {	# load
+	my $v =-f $f ? $s->fload($f) : undef;
+	my $VAR1;
+	$s->{-vgxv} =$v ? eval($v) : {}
+ }
+ elsif ($o eq 's') {	# store
+	my $o =Data::Dumper->new([$s->{-vgxv}||{}]); $o->Indent(1);
+	my $v =$o->Dump();
+	$s->fstore($f, $v)
+ }
+ elsif ($o eq 'd') {	# delete
+	delete $s->{-vgxi};
+	delete $s->{-vgxf};
+	delete $s->{-vgxv};
+	unlink($f)
+ }
 }
 
 
@@ -560,7 +636,7 @@ sub cmid {		# New / get command subdirectory
 	: $id =~/([^\\\/]+)$/
 	? $1
 	: $id;
-    $id =~s/\./-/g;
+    $id =~s/[^\w\d_]/-/g;
  if ($asc) {
 	0
 	? do{$id =$s->padl(0, 10, scalar(time)) .$$ .'-' .$id}
@@ -590,7 +666,7 @@ sub cmid {		# New / get command subdirectory
 	if (@dir >$lim) {
 		for (my $i=$lim; $i<=$#dir; $i++) {
 			my $t =$lgd .$s->{-dirm} .$dir[$i];
-			$s->echo("Deleting:\t'$t'") if $s->{-echo} >1;
+			$s->echo("Deleting:\t'$t'") if $s->{-echol} >1;
 			$^O eq 'MSWin32'
 			? system('cmd','/c','rmdir','/s','/q',$t)
 				# ? system('cmd','/c','del','/f','/s','/q',$t)
@@ -738,8 +814,9 @@ sub cmsubstrdo {	# Substitute 'rdo' file
 }
 
 
-sub execute {		# Execute command (target action)
- my $s =$_[0];		# ( ? [command line], ? -option=>value,...)	-> self
+
+sub execute {		# Execute command (target action) with current options
+ my $s =$_[0];		# ( ? [command line], ? -option=>value,...) -> success
     $s->set(@_[1..$#_]);
     $s->{-cid} =$s->{-cerr} =undef;
     $s->checkbase();
@@ -754,14 +831,17 @@ sub execute {		# Execute command (target action)
 						} @$_)
 				: ($s->qclad($_))
 				} @_[1..$#_])) 
-		if !$s->{-echo} ||($s->{-echo} >1)
+		if !$s->{-echol} ||($s->{-echol} >1)
  }
  elsif ($s->{-cpause} && !$s->{-cbranch}) {
+	$s->daemonize()	if $s->{-cloop} 
+			&& ($s->{-cloop} !~/[vw]/)
+			&& ($^O ne 'MSWin32');
 	$s->echo("StartLoop:\t" .$s->{-cloop} .'; '
 		, join(' ', $s->qclad(@ARGV))) 
-		if !$s->{-echo} ||($s->{-echo} >1);
+		if !$s->{-echol} ||($s->{-echol} >1);
 	eval{STDOUT->flush()};
-	sleep($s->{-cloop})
+	sleep($s->{-cloop} =~/(\d+)/ ? $1 || (60*10) : (60*10))
  }
  elsif ($s->{-cbranch}) {
 	$s->echolog("StartBranch:\t" .$s->{-cbranch} .'; '
@@ -772,6 +852,60 @@ sub execute {		# Execute command (target action)
 	my $r =eval{&{$s->{-reject}}($s)||''};
 	$r =$@ if !defined($r);
 	return($s->error("reject '$r'")) if $r;
+ }
+
+ if (('cmdfile' eq lc($s->{-cline}->[0]||0))	# Command file processing
+ ||  ('cmdfile' eq lc((ref($s->{-ctarget}) ? $s->{-ctarget}->[0] : $s->{-ctarget})||0))) {
+	my $cmd =[@{$s->{-cline}}];
+	   $cmd ='cmdfile' eq lc($cmd->[0])
+		? [@$cmd[1..$#$cmd]]
+		: $cmd;
+	$s->{-cerr} =[];
+	if ($cmd->[0] =~/\.(?:pl|p)$/) {
+		my $r =eval{	local $_ =$s;
+				local @ARGV =@$cmd[1..$#$cmd];
+				do $cmd->[0]};
+		$s->{-cerr}->[0] =1 if !$r;
+		return($r);
+	}
+	else {
+		$s->{-cmdfile}=eval('use Sys::Manage::CmdFile; Sys::Manage::CmdFile->new()')
+			if !$s->{-cmdfile};
+		my $e =0;
+		my $r =$s->{-cmdfile}
+			->dofile(sub {
+			my @arg=($s->qclad($^X)
+				,($0 =~/\.(?:bat|cmd)$/i ? ('-x') : ())
+				,$s->qclad($0)
+				,($s->{-ping} ?	('-g' .$s->{-pingtime})	: ())
+				,($s->{-vgxf} ?	('-gx' .$s->{-vgxf}) : ())
+				,($s->{-echo} ? ('-v' .$s->{-echo}) : ())
+				,$_);
+			local $s->{-echol} =$s->{-echo} =~/c/ ? $s->{-echol} ||1 : $s->{-echol};
+			$s->echo("CmdPick:\t", join(' ', @arg) ,' (', $cmd->[0],')')
+				if $s->{-echo} =~/c/;
+			$s->fstore('-',	'>>' .$_[1]
+				, ($s->{-echo} =~/t/ ? ($s->strtime() .' ') : '')
+				. '$$' .$$ .' '
+				. "CmdPick:\t"
+				. join(' ', @arg)
+				. "\n")
+				if $_[1];
+			if (system(join(' ', @arg)) !=-1) {
+				# cmdfile direct parsing is difficult due to
+				#	loops and command string parsing.
+				$e +=$?>>8 ? 1 : 0;
+				$s->echo("CmdExit:\t", ($?>>8), ' (' .join(' ', @arg) .')')
+					if $s->{-echo} =~/c/;
+			}
+			else {
+				$e +=1;
+				return($s->error("$! (" .join(' ', @arg) .')'))
+			}
+			}, @$cmd);
+		$s->{-cerr}->[0] =$e if $e;
+		return(!$e && $r);
+	}
  }
 
  my $target =$s->tgtexpand($s->{-ctarget});	# Expand Target(s) into elements
@@ -789,7 +923,8 @@ sub execute {		# Execute command (target action)
 		? join(', ', @{$s->{-ctarget}}) 
 		: $s->{-ctarget} ), " -> "
 	,join(", ", @$target))
-	if !$s->{-cbranch} && !$s->{-cpause} && (!$s->{-echo} ||($s->{-echo} >1));
+	if !$s->{-cbranch} && !$s->{-cpause} 
+	&& (!$s->{-echol} ||($s->{-echol} >1));
 
  my $cmd  =[@{$s->{-cline}}];			# Tune Command line
 	return($s->error("no command line")) if !$cmd->[0];
@@ -813,16 +948,21 @@ sub execute {		# Execute command (target action)
  $s->echo("Command:\t"
 	,join(' ', $s->qclad(@{$s->{-cline}})), " -> "
 	,join(' ', $s->qclad(@$cmd)))
-	if !$s->{-cbranch} && !$s->{-cpause} && (!$s->{-echo} ||($s->{-echo} >1));
+	if !$s->{-cbranch} && !$s->{-cpause} 
+	&& (!$s->{-echol} ||($s->{-echol} >1));
 
  eval('use Sys::Manage::CmdEscort; 1')		# Set Command Environment
 	|| return($s->error("no Sys::Manage::CmdEscort"));
+ $s->vgxf('l') if $s->{-vgxf};
  my $cid =$s->{-cid} =$s->cmid();
- my $dir =$s->{-dirb} .$s->{-dirm} .'log-' .$s->{-ckind} .$s->{-dirm} .$cid;
- mkdir($dir,0777) if !-d $dir;
+ my $dir =$s->{-dirb} .$s->{-dirm} .'log-' .$s->{-ckind};
+    mkdir($dir,0777) if !-d $dir;
+    $dir =$dir .$s->{-dirm} .$cid;
+    mkdir($dir,0777) if !-d $dir;
  $s->echo("Logging:\t" 
 	,"$cid -> $dir")
-	if !$s->{-cbranch} && !$s->{-cpause} && (!$s->{-echo} ||($s->{-echo} >1));
+	if !$s->{-cbranch} && !$s->{-cpause} 
+	&& (!$s->{-echol} ||($s->{-echol} >1));
 
  my $cms =$target;				# Branch Command
  my $order =$s->{-corder};
@@ -856,14 +996,17 @@ sub execute {		# Execute command (target action)
 			,(ref($s->{-ctarget}) ? map {"-t$_"} @{$s->{-ctarget}} : ('-t' .$s->{-ctarget}))
 			,(ref($s->{-cxtgt}) ? map {"-x$_"} @{$s->{-cxtgt}} : defined($s->{-cxtgt}) ? ('-t' .$s->{-cxtgt}) :())
 			,($s->{-cignor} ? '-i' : ())
+			,($s->{-vgxf} ? ('-gx' .$s->{-vgxf}) : ())
 			,($s->{-ping} ? ('-g' .$s->{-pingtime}) : ())
-			,($s->{-echo} !=2 ? '-v' .($s->{-echo}||0) : ())
-			,($s->{-echot} ? '-vt' : ())
+			,($s->{-echo} ? ('-v' .$s->{-echo}) : ())
 			,@{$s->{-cline}});
 		$s->echo("Branching:\t"
 			,join(' ', $s->qclad(@arg))) 
-			if !$s->{-echo} ||($s->{-echo} >1);
-		system(1, $^X, ($0 =~/\.(?:bat|cmd)$/i ? ('-x','-S') : ()), $s->qclat(@arg));
+			if !$s->{-echol} ||($s->{-echol} >1);
+		(system(1, $s->qclad($^X)
+			, ($0 =~/\.(?:bat|cmd)$/i ? ('-x') : ())
+			, $s->qclat(@arg)) == -1)
+		&& return($s->error("system(Branching) -> $!"));
 	}
 	$order ='s' if scalar(@brtgt) && !$brcnt;
 	if (!scalar(@brtgt)) {
@@ -882,32 +1025,38 @@ sub execute {		# Execute command (target action)
  foreach my $e (@$cms) {			# Execute Commands on Targets
 	my $fn =$dir .$s->{-dirm} .$e;
 	next if -e "${fn}-run.txt" || -e "${fn}-ok.txt";
+	next if $s->{-vgxv} && $s->{-vgxv}->{$e};
 	if (-e "${fn}-err.txt") {
-		if ($s->{-credo} || $s->{-loop}) {
+		if ($s->{-credo} 
+		|| ($s->{-cloop} && ($s->{-cloop} !~/g/))) {
 			unlink("${fn}-err.txt")
 		}
 		else {
 			next
 		}
 	}
+	if (-e "${fn}-erg.txt") {
+		unlink("${fn}-erg.txt")
+	}
 	if ($s->{-ping}) {		# pinging
 		$s->fstore("${fn}-go.txt"
 			,join("\t",$s->strtime()
 				,'[' .($ENV{SMPID}||$$) .",$$]"
-				,$s->class().'::ping'),"\n");
+				,$s->class().'::ping'
+				,map {defined($s->{$_})
+					? ($_ .'=' .$s->{$_})
+					: ($_ .'=undef')
+					} qw(-pingprot -pingtime -pingcount))
+				,"\n");
 		my $r =$s->ping($e);
 		if (!defined($r)) {
-			$s->fstore("${fn}-err.txt"
-				,join("\t",$s->strtime()
-				,'[' .($ENV{SMPID}||$$) .",$$]"
-				,$s->class() .'::ping'
-				,!defined($r) ? 'undef' : $r),"\n");
-			unlink("${fn}-go.txt");
+			rename("${fn}-go.txt", "${fn}-erg.txt")
+			||return($s->error("rename(", "${fn}-go.txt"
+				,",", "${fn}-erg.txt", ") -> $!"));
+			next
 		}
-		next if !$r;
-		unlink("${fn}-go.txt")
 	}
-	elsif (-e "${fn}-go.txt") {
+	if (-e "${fn}-go.txt") {
 		unlink("${fn}-go.txt")
 	}
 
@@ -927,7 +1076,12 @@ sub execute {		# Execute command (target action)
 				&& $s->dsmd(-assoc=>lc($1)));
 		$ENV{SMELEM} =$e;
 		$ENV{SMLOG}  =$fn;
-		my $u =$s->dsmd(-user=>$e);
+
+		my $u =   !$s->{-cuser}
+			? $s->dsmd(-user=>$e)
+			: $s->{-cuser} =~/^([^:]+):(.*)/
+			? [$1,$2]
+			: [$s->{-cuser},''];
 		my $p =ref($u) ? $u->[1] : $s->dsmd(-pswd=>$e);
 		   $u =ref($u) ? $u->[0] : $u;
 		   $u ='' if !defined($u);
@@ -942,10 +1096,10 @@ sub execute {		# Execute command (target action)
 		else {
 			unshift @$cme, @$a
 		}
-		$s->cmsubst($cme, '(elem|host|node)', $e);
-		$s->cmsubst($cme, '(log)', $fn);
 		$s->cmsubst($cme, '(user)', $u);
 		$s->cmsubst($cme, '(pswd|passwd|password)', $p);
+		$s->cmsubst($cme, '(elem|host|node|target)', $e);
+		$s->cmsubst($cme, '(log)', $fn);
 	}
 
 					# logging command to object
@@ -954,35 +1108,37 @@ sub execute {		# Execute command (target action)
 
 	if ($order =~/[s]/) {	# start types
 		eval{Sys::Manage::CmdEscort::CmdEscort([$fn, @$cme]
-		,-i=>$s->{-cignor},-v=>$s->{-echo},-vt=>$s->{-echot}); 1}
+		,-i=>$s->{-cignor}
+		,-v=>$s->{-echol} .($s->{-echo} =~/([t])/ ? $1 : '')); 1}
 		;#||warn("Error: Sys::Manage::CmdEscort::CmdEscort: $@\n");
 	}
 	if ($order =~/[b]/) {
 		eval{Sys::Manage::CmdEscort::CmdEscort([$fn, @$cme]
-		,-i=>$s->{-cignor},-v=>$s->{-echo},-vt=>$s->{-echot},-vc=>1); 1}
+		,-i=>$s->{-cignor}
+		,-v=>$s->{-echol} .($s->{-echo} =~/([t])/ ? $1 : '') .'c'); 1}
 		;#||warn("Error: Sys::Manage::CmdEscort::CmdEscort: $@\n");
 	}
 	elsif ($order =~/[c]/) {
 		$ENV{SMPID} =$$;
-		system(	 1	# [IPC::Open3] 1 == P_NOWAIT
-			,$^X
+		(system( 1	# [IPC::Open3] 1 == P_NOWAIT
+			,$s->qclad($^X)
 			,'-e"use Sys::Manage::CmdEscort; CmdEscort([@ARGV]'
 				.($s->{-cignor} ? ',-i=>1' : '')
-				.(',-v=>' .$s->{-echo}||0)
-				.($s->{-echot} ? ',-vt=>1' : '')
-				.(',-vc=>1')
+				.(',-v=>' .$s->{-echol} .($s->{-echo} =~/([t])/ ? $1 : '') .'c')
 				.')"'
 			,$s->qclat($fn, @$cme)
-			)
+			) ==-1)
+		&& return($s->error("system(CmdEscort) -> $!"));
 	}
  }
 
  if (($order =~/[sc]/)			# Reap/wait child processes
  ||  (!$s->{-cbranch} && ($order =~/[b]/))){
-	while (waitpid(-1,0) >=0) {} # wait() >=0
+	while (waitpid(-1,0) !=-1) {} # wait() >=0 # WNOHANG
  }
 
  my $errc =[];					# Count errors
+ my $errl =0;
  if (!$s->{-cbranch}) {
 	foreach my $e (@$target) {
 		my $fn =$dir .$s->{-dirm} .$e;
@@ -991,21 +1147,41 @@ sub execute {		# Execute command (target action)
 		if    (-e "${fn}-ok.txt") {
 		}
 		elsif (-e "${fn}-err.txt") {
-			$errc->[0] =($errc->[0]||0) +1;
+			$errc->[0]	 =($errc->[0]||0) +1;
+			$errl		+=1	if $s->{-cloop} 
+						&& ($s->{-cloop} !~/g/);
+			$s->{-vgxv}->{$e}=1	if $s->{-vgxv};
 			$s->{-logevt} && &{$s->{-logevt}}($s, $fn, $cmd, 'err');
 		}
-		elsif (-e "${fn}-run.txt") {
+		elsif (-e "${fn}-erg.txt") {
+			$errc->[0]	 =($errc->[0]||0) +1;
+			$errl		+=1;
+			$s->{-vgxv}->{$e}=1	if $s->{-vgxv};
+		}
+		elsif ( (-e "${fn}-run.txt")
+		||	(-e "${fn}-go.txt")) {
 			$errc->[1] =($errc->[1]||0) +1;
+			$s->{-vgxv}->{$e} =1	if $s->{-vgxv};
 			$s->{-logevt} && &{$s->{-logevt}}($s, $fn, $cmd, 'run');
 		}
+		elsif ($s->{-vgxv} && $s->{-vgxv}->{$e}) {
+			$s->fstore("${fn}-erg.txt"
+				,join("\t",$s->strtime()
+				,'[' .($ENV{SMPID}||$$) .",$$]"
+				,$s->class() .'::gx'
+				,'continued'), "\n")
+		}
 		else {
-			$errc->[2] =($errc->[2]||0) +1;
+			$errc->[2]	 =($errc->[2]||0) +1;
+			$errl		+=1;
+			$s->{-vgxv}->{$e}=1	if $s->{-vgxv};
 			$s->{-logevt} && &{$s->{-logevt}}($s, $fn, $cmd, 'exit');
 		}
 	}
  }
  if (@$errc) {
 	$s->{-cerr} =$errc;
+	$s->vgxf('s') if $s->{-vgxf} && !$s->{-cpause};
 	$s->echo("Backlogs:\t"
 		, join(', '
 		, ($errc->[0] ? $errc->[0] .' exited'	: ())
@@ -1016,7 +1192,7 @@ sub execute {		# Execute command (target action)
 	$s->{-cerr} =undef;
 	$s->echo("Backlogs:\tOk") if !$s->{-cbranch};
  }
- if ($s->{-cloop} && @$errc) {			# Loop rerun
+ if ($s->{-cloop} && $errl) {			# Loop rerun
 	my @arg =($0
 		,('-l' .$s->{-cloop})
 		,($s->{-cpause} ? ('-p' .$s->{-cpause}) : ('-p1'))
@@ -1027,20 +1203,45 @@ sub execute {		# Execute command (target action)
 		,(ref($s->{-cxtgt}) ? map {"-x$_"} @{$s->{-cxtgt}} : defined($s->{-cxtgt}) ? ('-t' .$s->{-cxtgt}) :())
 		,($s->{-cignor} ? '-i' : ())
 		,($s->{-ping} ? ('-g' .$s->{-pingtime}) : ())
-		,($s->{-echo} !=2 ? '-v' .($s->{-echo}||0) : ())
-		,($s->{-echot} ? '-vt' : ())
+		,($s->{-echo} ? ('-v' .$s->{-echo}) : ())
 		,@{$s->{-cline}});
 	$s->echo("Looping:\t", join(' ', $s->qclad(@arg)))
-		if !$s->{-echo} ||($s->{-echo} >1);
-	$SIG{CHLD} ='IGNORE';
-	system(1, $^X, ($0 =~/\.(?:bat|cmd)$/i ? ('-x','-S') : ()), $s->qclat(@arg));
+		if !$s->{-echol} ||($s->{-echol} >1);
+	if (($^O eq 'MSWin32') && ($s->{-cloop} !~/v/)) {
+		eval('use Win32::Process');
+		Win32::Process::Create($Win32::Process::Create::ProcessObj
+			, $^X	||$Win32::Process::Create::ProcessObj
+			, join(' '
+				, $s->qclad($^X)
+				, ($0 =~/\.(?:bat|cmd)$/i ? ('-x') : ())
+				, $s->qclat(@arg))
+			, 0
+			, ($s->{-cloop} =~/w/) || 1
+			? &CREATE_NEW_CONSOLE : &CREATE_NEW_PROCESS_GROUP
+			, '.')
+		|| return($s->error("system(Looping) -> $!"));
+			# ??? IPC::Open3 fails with DETACHED_PROCESS;
+			# use CREATE_NEW_CONSOLE better CREATE_NEW_PROCESS_GROUP
+			# with 'daemonize' also.
+	}
+	else {
+		$SIG{CHLD} ='IGNORE';
+		(system(1, $s->qclad($^X)
+			, ($0 =~/\.(?:bat|cmd)$/i ? ('-x') : ())
+			, $s->qclat(@arg)) ==-1)
+		&& return($s->error("system(Looping) -> $!"));
+	}
  }
  !$s->{-cerr}
 }
 
 
-sub cmdfile {	# Shift command file
- $_[0]->{-cmdfile} =eval('use Sys::Manage::CmdFile; Sys::Manage::CmdFile->new()')
-	if !$_[0]->{-cmdfile};
- $_[0]->{-cmdfile}->dofile(@_[1..$#_])
+sub cmd {		# Execute command (target action) given
+ my $s =shift;		# (execute args) -> success
+ foreach my $k (qw(-credo -cassign -cloop -cpause -cbranch -ctarget -cxtgt -cuser -cignor -cline)) {
+	# not reset input:  -ckind -corder
+	# not reset output: -cid   -cerr
+	delete $s->{$k}
+ }
+ $s->execute(@_)
 }

@@ -12,7 +12,6 @@ require Exporter;
 use strict;
 use Carp;
 use IO::File;
-use IPC::Open3;
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
 @ISA	= qw(Exporter);
 @EXPORT	= qw(CmdEscort);
@@ -39,9 +38,9 @@ sub initialize {	# Initialize newly created object
 			? Win32::GetCwd()
 			: eval('use Cwd; Cwd::getcwd')}
 	#-cignor	=>undef		# -i	# command exit code ignoring
-	,-echo		=>2		# -v	# echo verbosity level
-	#-echot		=>undef		# -vt	# echo time including
-	#-echoc		=>undef		# -vc	# echo concurrency mode
+	,-echo		=>2		# -v	# echo verbosity switches
+					# -vct	# ... concurrency, time including
+	,-echol		=>2		# -v#	# ... verbosity level
 	,-clog		=>''		# ...	# command log name
 	,-cline		=>[]		# ...	# command line
 	, %$s
@@ -68,8 +67,6 @@ sub set {               # Get/set slots of object
 	my($n, $v) =($k, $opt{$k});
 	$n =	  $n eq '-i'	? '-cignor'
 		: $n eq '-v'	? '-echo'
-		: $n =~/^-vt/	? '-echot'
-		: $n =~/^-vc/	? '-echoc'
 		: $n;
 	delete $opt{$k};
 	$opt{$n} =$v
@@ -79,18 +76,20 @@ sub set {               # Get/set slots of object
 		$opt{-cignor} =($1 eq '' ? 1 : $1)
 				if !exists $opt{-cignor}
 	}
-	elsif ($arg->[$i] =~/^-v([\w\d]*)$/i) {
+	elsif ($arg->[$i] =~/^-v([\d\w]*)$/i) {
 		my $v =$1;
-		$opt{-echo} =$v	if !(exists $opt{-echo})  && ($v =~/^\d+$/);
-		$opt{-echo} =2	if !(exists $opt{-echo})  && ($v eq '');
-		$opt{-echot}=1	if !(exists $opt{-echot}) && ($v =~/^t/i);
-		$opt{-echoc}=1	if !(exists $opt{-echoc}) && ($v =~/^c/i);
+		   $v =''	if !defined($v);
+		   $v .=2	if $v !~/\d/;		
+		$opt{-echo} =$v	if !(exists $opt{-echo});
+		$opt{-echol}=$v =~/(\d+)/ ? $1 : 2;
 	}
 	else {
 		$opt{-clog}  =$arg->[$i];
 		$opt{-cline} =[@$arg[$i+1..$#$arg]]; last;
 	}
  }}
+ $opt{-echol} =$opt{-echo} =~/(\d+)/ ? $1 : 2
+		if $opt{-echo};
  foreach my $k (keys(%opt)) {
 	$s->{$k} =$opt{$k};
  }
@@ -114,18 +113,47 @@ sub strtime {		# Log time formatter
 
 
 sub qclad {		# Quote command line arg(s) on demand
-	map {	/[&<>\[\]{}^=;!'+,`~\s%"?*|()]/	# ??? see shell
+	map {	!defined($_) || ($_ eq '')
+		? '""'
+		: /[&<>\[\]{}^=;!'+,`~\s%"?*|()]/	# ??? see shell
 		? do {	my $v =$_; $v =~s/"/\\"/g; '"' .$v .'"' }
 		: $_ } @_[1..$#_]
 }
 
 
 sub qclat {		# Quote command line arg(s) total
-	map {	my $v =$_;
+	map {	my $v =defined($_) ? $_ : '';
 		$v =~s/"/\\"/g;
 		'"' .$v .'"'
 		} @_[1..$#_]
 }
+
+
+
+sub copen3 {		# Command output open
+ my $s =$_[0];		# (?input file, handle var, command,...) -> pid
+ my $p;
+ if (0) {
+	$_[2] =eval('use IO::File; IO::File->new()');
+	$p =open($_[2], '-|', join(' ', @_[3..$#_]) 
+		.' 2>>&1'
+		.($_[1] ? ' <' .$_[1] : ''));
+ }
+ else {
+	eval('use IPC::Open3');
+	local *IN;
+	open(IN,'<', $_[1]) 
+		|| do{	$@ ="Open('<" .$_[1] ."') -> $! ($^E)";
+			return(undef)}
+		if $_[1];
+	my $x =($_[1] ? '<&IN' : undef);
+	$p =eval{IPC::Open3::open3($x, $_[2], $_[2], @_[3..$#_])};
+	eval{fileno($x) && close($x)};
+	eval{fileno(IN) && close(IN)} if !defined($p) && $_[1];
+ }
+ $p
+}
+
 
 
 sub CmdEscort {		# New + Execute shortcut
@@ -141,7 +169,7 @@ sub execute {		# Execute command (target action)
 	: ('')) .$$;
 
  my $fl =$s->{-clog};
-	foreach my $k ('-go.txt','-run.txt','-ok.txt','-err.txt') {
+	foreach my $k ('-go.txt','-run.txt','-ok.txt','-err.txt','-erg.txt') {
 		next if !-e "$fl$k";
 		unlink("$fl$k")
 	}
@@ -151,22 +179,20 @@ sub execute {		# Execute command (target action)
  $fh->print($s->strtime()," \$\$$p "
 	,join(' ', $s->qclad(@{$s->{-cline}})),"\n");
  $fh->flush();
- local *OLDIN;	open(OLDIN,  '<&STDIN');
- local *OLDOUT; open(OLDOUT, '>&STDOUT');
- local *OLDERR; open(OLDERR, '>&STDERR');
- local *RDRIN;
+ local *OLDIN;	fileno(STDIN)  && open(OLDIN,  '<&STDIN');
+ local *OLDOUT; fileno(STDOUT) && open(OLDOUT, '>&STDOUT');
+ local *OLDERR; fileno(STDERR) && open(OLDERR, '>&STDERR');
  my $cl =[@{$s->{-cline}}];
  my $hi =undef;
  my $ho =undef;
 	if ((@$cl>2) && ($cl->[$#$cl-1] eq '<')) {
-		$ho =open(RDRIN,'<',$cl->[$#$cl]) 
-			|| croak("[$p] Error: opening '" .$cl->[$#$cl] ."': $!");
+		$ho =$cl->[$#$cl];
 		$cl =[@$cl[0..$#$cl-2]];
 	}
 
- print(($s->{-echot} ? ($s->strtime(), ' ') : ()), "\$\$$p ", $s->{-clog}
+ print(($s->{-echo} =~/t/ ? ($s->strtime(), ' ') : ()), "\$\$$p ", $s->{-clog}
 	," = ", join(' ', $s->qclad(@{$s->{-cline}})), "\n")
-	if $s->{-echo};
+	if $s->{-echol};
  my $hp;
  ($?,$!,$^E) =(0,0,0);
  if ($cl->[0] && ($cl->[0] =~/^(do|eval)$/)) {
@@ -193,16 +219,14 @@ sub execute {		# Execute command (target action)
 		, ($@ ? (!($?>>8) ? '[eval] ' : '') ."$@" : ())
 		, ($@ ? $! .($^E ? "($^E)" : '') : ())), "\n");
 	eval{STDOUT->flush(); STDERR->flush()};
-	open(STDIN,  '<&OLDIN');	close(OLDIN);
-	open(STDOUT, '>&OLDOUT');	close(OLDOUT);
-	open(STDERR, '>&OLDERR');	close(OLDERR);
+	fileno(OLDIN)  && open(STDIN,  '<&OLDIN');  fileno(OLDIN)  && close(OLDIN);
+	fileno(OLDOUT) && open(STDOUT, '>&OLDOUT'); fileno(OLDOUT) && close(OLDOUT);
+	fileno(OLDERR) && open(STDERR, '>&OLDERR'); fileno(OLDERR) && close(OLDERR);
 	$fh->close();
 	($?,$!,$^E,$@) =@e;
-	print( 	 ($s->{-echot} ? ($s->strtime(), ' ') : ())
+	print( 	 ($s->{-echo} =~/t/ ? ($s->strtime(), ' ') : ())
 		,"\$\$$p "
-		, ($s->{-echoc}
-		? $s->{-clog} ." = "
-		: 'Exit: ')
+		,($s->{-echo} =~/c/ ? $s->{-clog} ." = " : 'Exit: ')
 		, join(' '
 		, ($r ? 0 : $?>>8 ? $?>>8 : $@ ? 255 : 255)
 		, (($? & 127)||($? & 128)
@@ -210,7 +234,7 @@ sub execute {		# Execute command (target action)
 		  : ())
 		, ($@ ? (!($?>>8) ? '[eval] ' : '') ."$@" : ())
 		, ($@ ? $! .($^E ? "($^E)" : '') : ())), "\n")
-		if $s->{-echo};
+		if $s->{-echol};
 	eval{STDOUT->flush(); STDERR->flush()};
 	rename(	  $s->{-clog} .'-run.txt'
 		, (!$r) && !$s->{-cignor}
@@ -218,42 +242,39 @@ sub execute {		# Execute command (target action)
 		: ($s->{-clog} .'-ok.txt'));
 	chdir($s->{-dirw}) if lc($s->getcwd()) ne lc($s->{-dirw});
  }
- elsif ($hp =eval{IPC::Open3::open3( $ho ? '<&RDRIN' : '<&STDIN'
-				, $hi
-				, $hi
-				,($cl ->[0] eq '-e'
-				? ($^X
-					,'-e'
-					,do{my	$v =$cl->[1]; $v=~s/"/\\"/g;
-						$v =$v=~/^([\w\d:]+)->/
-						? "use $1;$v"
-						: $v;
-						'"exit !do{' .$v .'}"'}
-					,$s->qclad(@$cl[2..$#$cl]))
-				: $s->qclad(@$cl)))}) {
+ elsif ($hp =$s->copen3(  $ho
+			, $hi
+			,($cl ->[0] eq '-e'
+			? ($^X
+				,'-e'
+				,do{my	$v =$cl->[1]; $v=~s/"/\\"/g;
+					$v =$v=~/^([\w\d:]+)->/
+					? "use $1;$v"
+					: $v;
+					'"exit !do{' .$v .'}"'}
+				,$s->qclad(@$cl[2..$#$cl]))
+			: $s->qclad(@$cl)))) {
 	($!,$^E) =(0,0);
 	my $r;
 	while (defined($r =readline($hi))) {
 		$r = $` if $r =~/[\r\n]*$/;
-		print $r,"\n"	if $s->{-echo} && !$s->{-echoc};
+		print $r,"\n"	if $s->{-echol} && ($s->{-echo} !~/c/);
 		$fh->print($r,"\n");
 	}
 	waitpid($hp,0);
 	my @e =($?,$!,$^E,$@);
 	{	eval{STDOUT->flush(); STDERR->flush()};
-		open(STDIN,  '<&OLDIN');	close(OLDIN);
-		open(STDOUT, '>&OLDOUT');	close(OLDOUT);
-		open(STDERR, '>&OLDERR');	close(OLDERR);
+		fileno(OLDIN)  && open(STDIN,  '<&OLDIN');  fileno(OLDIN)  && close(OLDIN);
+		fileno(OLDOUT) && open(STDOUT, '>&OLDOUT'); fileno(OLDOUT) && close(OLDOUT);
+		fileno(OLDERR) && open(STDERR, '>&OLDERR'); fileno(OLDERR) && close(OLDERR);
 		eval{STDOUT->flush(); STDERR->flush()}};
 	($?,$!,$^E,$@) =@e;
-	print( 	 ($s->{-echot} ? ($s->strtime(), ' ') : ())
+	print( 	 ($s->{-echo} =~/t/ ? ($s->strtime(), ' ') : ())
 		,"\$\$$p "
-		, ($s->{-echoc}
-		? $s->{-clog} ." = "
-		: 'Exit: ')
+		,($s->{-echo} =~/c/ ? $s->{-clog} ." = " : 'Exit: ')
 		,($?>>8)
 		,($?>>8 ? " $!" : '')
-		,"\n") if $s->{-echo};
+		,"\n") if $s->{-echol};
 	($?,$!,$^E,$@) =@e;
 	$fh->print($s->strtime()
 		, " \$\$$p Exit: "
@@ -273,14 +294,17 @@ sub execute {		# Execute command (target action)
  }
  else {
 	my @e =($?,$!,$^E,$@);
-	open(STDIN,  '<&OLDIN');	close(OLDIN);
-	open(STDOUT, '>&OLDOUT');	close(OLDOUT);
-	open(STDERR, '>&OLDERR');	close(OLDERR);
+	fileno(OLDIN)  && open(STDIN,  '<&OLDIN');  fileno(OLDIN)  && close(OLDIN);
+	fileno(OLDOUT) && open(STDOUT, '>&OLDOUT'); fileno(OLDOUT) && close(OLDOUT);
+	fileno(OLDERR) && open(STDERR, '>&OLDERR'); fileno(OLDERR) && close(OLDERR);
 	($?,$!,$^E,$@) =@e;
-	$fh->print($s->strtime(), " \$\$$p Exit: 255 [IPC] $! $@\n");
-	$fh->close();
+	eval{$fh->print($s->strtime(), " \$\$$p Exit: 255 [IPC] $! $@\n")};
+	eval{$fh->close()};
 	eval{STDOUT->flush(); STDERR->flush()};
-	rename(($s->{-clog} .'-run.txt'), ($s->{-clog} .'-err.txt'));
+	rename(($s->{-clog} .'-run.txt'), ($s->{-clog} .'-err.txt'))
+		|| carp("\$\$$p rename: (" .($s->{-clog} .'-run.txt')
+			.', ' .($s->{-clog} .'-err.txt') .") -> $! " 
+			.($^E ? " ($^E)" : '') ."\n");
 	chdir($s->{-dirw}) if lc($s->getcwd()) ne lc($s->{-dirw});
 	($?,$!,$^E,$@) =@e;
 	croak("\$\$$p Exit: 255 [IPC] $! $@");

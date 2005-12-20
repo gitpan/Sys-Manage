@@ -5,11 +5,10 @@
 # makarow, 2005-09-19
 #
 #
-# !!! see in source code
-# ??? special agent routine or module
-# ??? -b- do not use, incorrect file size
-# ??? unique of -mark
-# ??? concepts of '-mark' and 'eval'
+# !!! ??? see in source code.
+# ??? interactive to user commands.
+# ??? do not use -b- option due to incorrect file sizing.
+# ??? uniqueness of -mark, concepts of '-mark' and 'eval'.
 #
 
 package Sys::Manage::Conn;
@@ -22,7 +21,9 @@ use IO::Select;
 use Safe;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.50';
+$VERSION = '0.51';
+
+my $qlcl =0;	# quoting local args not needed because of shell quoting
 
 1;
 
@@ -180,6 +181,7 @@ sub set {               # Get/set slots of object
 		shift @$arg;
 	}
 	elsif (!$arg->[0]) {
+		$opt{-node} =$arg->[0] if defined($arg->[0]) && ($arg->[0] ne '');
 		shift @$arg;
 	}
 	if ($arg->[0] && ($arg->[0]=~/^([^:]+):(.+)/)) {
@@ -192,6 +194,8 @@ sub set {               # Get/set slots of object
 	}
 
  }
+ $opt{-node} =$^O eq 'MSWin32' ? Win32::NodeName() : 'localhost'
+		if exists($opt{-node}) && !$opt{-node};
  $opt{-echo} =3 if $opt{-debug};
  foreach my $k (keys(%opt)) {
 	$s->{$k} =$opt{$k};
@@ -206,14 +210,16 @@ sub isqclad {		# May need shell quote command line arg???
 
 
 sub qclad {		# Quote command line arg(s) on demand
-	map {	isqclad($_[0],$_)
+	map {	!defined($_) || ($_ eq '')
+		? '""'
+		: isqclad($_[0],$_)
 		? do {	my $v =$_; $v =~s/"/\\"/g; '"' .$v .'"' }
 		: $_ } @_[1..$#_]
 }
 
 
 sub qclat {		# Quote command line arg(s) totally
-	map {	my $v =$_;
+	map {	my $v =defined($_) ? $_ : '';
 		$v =~s/"/\\"/g;
 		'"' .$v .'"'
 		} @_[1..$#_]
@@ -278,6 +284,23 @@ sub strtime {		# Log time formatter
 }
 
 
+sub copen {		# Command output open
+ my $s =$_[0];		# (handle var, command,...) -> pid
+ my $p;
+ if (0) {
+	$_[1] =eval('use IO::File; IO::File->new()');
+	$p =open($_[1], '-|', join(' ', @_[2..$#_]) .' 2>>&1');
+ }
+ else {
+	eval('use IPC::Open3');
+	my $x;
+	$p =eval{IPC::Open3::open3($x, $_[1], $_[1], @_[2..$#_])};
+	eval{fileno($x) && close($x)};
+ }
+ $p
+}
+
+
 sub disconnect {	# Disconnect agent
  my $s=$_[0];		# () -> self
  delete $s->{''};
@@ -293,30 +316,88 @@ sub disconnect {	# Disconnect agent
 }
 
 
+sub agtsrc {		# Agent source
+ my($s,$f) =@_;		# (?separate file)
+ #use IO::Socket; my($m_,$r_); $r_=IO::Socket::INET->new(LocalPort=>8081,Listen=>1); $m_=$r_->accept(); $r_->close; open(STDERR, '>&STDOUT'); open(STDOUT, '>&' .$m_->fileno); eval $m_->getline if $m_->peerhost() eq '127.0.0.1'
+ #use IO::Socket; my($m_,$r_); $r_=IO::Socket::INET->new(LocalPort=>8081,Listen=>1); $m_=$r_->accept(); $r_->close; if($m_->peerhost eq '127.0.0.1'){my $r_; while(defined($r_=$m_->getline)){$m_->printflush($r_)}}
+ my $r ='use IO::Socket;'
+ .(!$f		? ''
+		: "my(\$m_,\$r_,\$p_);\n")
+ .'$r_=IO::Socket::INET->new(LocalPort=>' .$s->{-port}
+ .($s->{-timeout} ? ',Timeout=>' .$s->{-timeout} : '')
+ .',Reuse=>1,Listen=>1);'
+ .(!$f		?('$m_=$r_->accept();$r_->close;')
+  : $f eq 'l'	?("\n\$m_=\$r_->accept();\$r_->close;\$r_=undef;\$p_=system(1,\$^X,\$0);\n")
+    		:("\nwhile(\$m_=\$r_->accept()){\$SIG{CHLD}='IGNORE';\n"
+		 .'if($^O eq "MSWin32"){eval("use Win32::Process");$r_->close();$r_=undef;' ."\n"
+		 .'Win32::Process::Create($Win32::Process::Create::ProcessObj'
+		 .',$^X||$Win32::Process::Create::ProcessObj'
+		 .', join(" ",$^X, ($0 =~/\.(?:bat|cmd)$/i ?("-x") :()), $0)'
+		 .', 0, &CREATE_NEW_PROCESS_GROUP, ".");' ."\n"
+		 .'forked();exit(0)}' ."\n"
+		 .'elsif(!defined($p_=fork())){die()}'
+		 .'elsif(!$p_){forked();exit(0)}'
+		 .'elsif($^O eq "MSWin32"){waitpid($p_,0)}'
+		 ."else{}\n}\n"
+		 ."sub forked{\$SIG{CHLD}='DEFAULT'; my(\$r_,\$t_);\n"))
+ .($s->{-chkip} && !$s->{-debug} 
+	? 'die if $m_->peerhost ne \'' .$s->{-chkip} .'\';' 
+	 .($f ? "\n" : '')
+	: '')
+ .'while(defined($r_=$m_->getline)){$@=undef;$r_=eval $r_;'
+ .($f ? "\n" : '')
+ .'$m_->printflush("\\n'
+ .do{my	$v =$s->{-mark};
+	$v =~s/([\$\@\\])/\\$1/g;
+	$v}
+ .'$?\\t$!\\t$^E\\t$@\\t$r_\\n")'
+ .(!$f		? '}'
+  : $f eq 'l'	? '}'
+		: "\n}\$m_->close}");
+ $r =~s/(["])/\\$1/g if !$f;
+ $r
+}
+
+
+sub agtfile {		# Agent source write
+ my $s =shift;	# (?"-'?",filename) -> success
+ my $o =$_[0] =~/^-(?:\w[\w\d+-]*)*$/ ? shift : '-';
+ my $f =shift;
+ if ($qlcl && ($o !~/'/)) {
+	$f =~s/([\\"])/\\$1/g;
+	$f =eval('"' .$f .'"');
+ }
+ my $r =$s->lfwrite('-b+', $f, $s->agtsrc('f'));
+ if ($r && $o =~/l(?![0-])/) {
+	(0 && ($^O eq 'MSWin32') && eval('Win32::IsWin95()')
+	? eval('use Win32::Process; 1')	# ??? may be wrong
+		&& ($Win32::Process::Create::ProcessObj ||1)
+		&& Win32::Process::Create($Win32::Process::Create::ProcessObj
+			,$^X
+			#join(' ',$s->qclad($^X,'-e','system(1,$^X,@ARGV)', $f, @_))
+			,join(' ',$s->qclad($^X, $f, @_))
+			, 0, &DETACHED_PROCESS, '.')
+	: system(1, $s->qclad($^X, $f, @_)) !=-1
+	)
+	|| return($s->error('agtfile:',"cannot start '$f': $!"));
+ }
+ $r
+}
+
+
 sub connect {		# Connect agent node
  my $s =  ref($_[0]) 	# (set args) -> self
 	? ($#_ ? set(@_) : $_[0])
 	: ($#_ ? Sys::Manage::Conn->new(@_[1..$#_]) : Sys::Manage::Conn->new());
+ if ($s->{-exec} && $s->{-argv} && @{$s->{-argv}}
+ &&  $s->{-argv}->[0] =~/^(agtfile|lcmd)/) {
+	return($s->$1(@{$s->{-argv}}[1..$#{$s->{-argv}}]))
+ }
  $s->{''} =1;
  $s->disconnect() if $s->{-agent};
  my $cts =time();
- my $agt =$s->{-asrc} && $s->{-asrc}->[0] ||
-	#use IO::Socket; my($m_,$r_); $r_=IO::Socket::INET->new(LocalPort=>8081,Listen=>1); $m_=$r_->accept(); $r_->close; open(STDERR, '>&STDOUT'); open(STDOUT, '>&' .$m_->fileno); eval $m_->getline if $m_->peerhost() eq '127.0.0.1'
-	#use IO::Socket; my($m_,$r_); $r_=IO::Socket::INET->new(LocalPort=>8081,Listen=>1); $m_=$r_->accept(); $r_->close; if($m_->peerhost eq '127.0.0.1'){my $r_; while(defined($r_=$m_->getline)){$m_->printflush($r_)}}
-	($s->{-perl} .' -e "use IO::Socket;'
-	#.'my($m_,$r_);'
-	.'$r_=IO::Socket::INET->new(LocalPort=>' .$s->{-port}
-	.($s->{-timeout} ? ',Timeout=>' .$s->{-timeout} : '')
-	.',Reuse=>1,Listen=>1);'
-	.'$m_=$r_->accept();$r_->close;'
-	.($s->{-chkip} && !$s->{-debug} ? 'die if $m_->peerhost ne \'' .$s->{-chkip} .'\';' : '')
-	.'while(defined($r_=$m_->getline)){$@=undef;$r_=eval $r_;'
-	.'$m_->printflush(\\"\\n'
-	.do{my	$v =$s->{-mark};
-		$v =~s/([\$\@\\])/\\$1/g;
-		$v}
-	.'$?\\t$!\\t$^E\\t$@\\t$r_\\n\\")'
-	.'}"');
+ my $agt =$s->{-asrc} && $s->{-asrc}->[0]
+	|| ($s->{-perl} .' -e "' .$s->agtsrc(0) .'"');
  my $ctp =join(' '
 		,''
 		,$s->{-node} .':' .$s->{-port}
@@ -372,7 +453,7 @@ sub connect {		# Connect agent node
 			, join(' ', @c)
 			, ') (', length($agt), ' bytes)'
 			, "...\n") if $s->{-echo} >2;
-	system(@c);
+	(system(@c) ==-1) && return($s->error('rsh:',$!));
 	($?>>8) && return($s->error('rsh:',($?>>8)))
  }
  elsif ($s->{-init} eq 'telnet') {	# using telnet
@@ -421,7 +502,7 @@ sub connect {		# Connect agent node
  if ($s->{-exec}) {
 	if (!$s->{-argv} || !@{$s->{-argv}}) {
 	}
-	elsif ($s->{-argv}->[0] =~/^(rcmd|lcmd|reval|fput|rfput|fget|rfget|rdo)/) {
+	elsif ($s->{-argv}->[0] =~/^(rcmd|reval|fput|rfput|fget|rfget|rdo)/) {
 		return($s->$1(@{$s->{-argv}}[1..$#{$s->{-argv}}]))
 	}
 	else {
@@ -582,18 +663,29 @@ sub lcmd {	# Local OS command
  my $s =shift;	# (?"-", command and arguments, ?filter sub{}) -> success
  my $o =$_[0] =~/^-(?:\w[\w\d+-]*)*$/ ? shift : '-';
  my $f =ref($_[$#_]) eq 'CODE' ? pop : undef;
- $s->echo('lcmd', join(' ', map{defined($_) ? (qclad($s,$_)) : ('undef')} $o, @_), "\n")
+ $s->echo('lcmd', join(' '
+	, map{	defined($_) 
+		? (qclad($s, $qlcl && ($o !~/'/)
+				? do {	my $v =$_;
+					$v =~s/([\\"])/\\$1/g;
+					eval('"' .$v .'"') }
+				: $_ )) 
+		: ('undef')
+		} $o, @_), "\n")
 	if $s->{-echo};
  if ($f) {
-	eval('use IPC::Open3');
-	my ($ho,$hi);
 	$!=$^E=0;
-	my $pid =eval{IPC::Open3::open3($ho, $hi, $hi
+	my $hi;
+	my $pid =$s->copen($hi
 			, map { (scalar(@_) >1) && isqclad($s, $_)
 				? do {	my $v =$_;
+					if ($qlcl && ($o !~/'/)) {
+						$v =~s/([\\"])/\\$1/g;
+						$v =eval('"' .$v .'"');
+					}
 					$v =~s/"/\\"/g;
 					'"' .$v .'"'}
-				: $_ } @_)};
+				: $_ } @_);
 	if ($pid) {
 		local $_;
 		my $r =undef;
@@ -603,22 +695,27 @@ sub lcmd {	# Local OS command
 			&$f($s,$_=$r)
 		}
 		my @t =($!,$^E);
-		$ho && close($ho);
 		$hi && close($hi);
 		STDOUT->flush();
 		($!,$^E) =@t;
 		waitpid($pid,0);
 	}
 	else {
-		return(undef)
+		return($s->error('lcmd:',$!))
 	}
  }
  else {
-	system(map { (scalar(@_) >1) && isqclad($s, $_)
+	(system(map { (scalar(@_) >1) && isqclad($s, $_)
 			? do {	my $v =$_;
+				if ($qlcl && ($o !~/'/)) {
+					$v =~s/([\\"])/\\$1/g;
+					$v =eval('"' .$v .'"');
+				}
 				$v =~s/"/\\"/g;
 				'"' .$v .'"'}
-			: $_ } @_)
+			: $_ } @_) ==-1)
+		&& return($s->error('lcmd:',$!))
+
  }
  !($?>>8)
 }
@@ -714,6 +811,10 @@ sub fget {	# Get remote file
  my $o =$_[0] =~/^-(?:\w[\w\d+-]*)*$/ ? shift : '-';
  my ($fa, $fm, @ps) =@_;
  $s->connect if !$s->{''};
+ if ($qlcl && ($o !~/'/) && ($o !~/s(?![0-])/)) {
+	$fm =~s/([\\"])/\\$1/g;
+	$fm =eval('"' .$fm .'"');
+ }
  my($m_, $fz, $fh);
  return($s->error("fget: empty args"))
 	if !defined($fa) || ($fa eq '');
@@ -831,6 +932,10 @@ sub fput {	# Put remote file
  my ($fm,$fa,@ps) =@_;
  my $fe =scalar(@ps) && (ref($ps[$#ps]) eq 'CODE') ? pop @ps : undef;
  $s->connect if !$s->{''};
+ if ($qlcl && ($o !~/'/) && ($o !~/s(?![0-])/)) {
+	$fm =~s/([\\"])/\\$1/g;
+	$fm =eval('"' .$fm .'"');
+ }
  return($s->error("fput: empty args"))
 	if !defined($fm) || !defined($fa) || ($fa eq '');
  $s->echo('fput', qclad($s,$o), ' '

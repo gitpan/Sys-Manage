@@ -266,28 +266,47 @@ Implemented for Windows only, Windows Resource Kit used.
 
 
 
-=item cmdfile (script file, command file)
-
-=item cmdfile (script file, command file => history file)
-
-=item cmdfile (script file, command file, ? history file, ? redirect log file)
+=item cmdfile (? script file || false, command file, ? history file || false, ? redirect log file || false)
 
 =item cmdfile (sub{}(command row, redirect log file),...)
 
-Proceeds text file interpreting rows as script commands
-and moving rows proceeded to history file if given.
+=item cmdfck (script file, command file, ? history file || false, ? redirect log file || false)
 
-This is an utility method from L<Sys::Manage::CmdFile|Sys/Manage/CmdFile>
+=item cmdfck (sub{}(commands file, ? history file, ? redirect log file),...)
+
+This is an utility methods from L<Sys::Manage::CmdFile|Sys/Manage/CmdFile>
 may be useful sometimes.
 
-Example:
+C<cmdfile> proceeds text file interpreting rows as commands
+for script or sub{}
+and moving rows proceeded to history file if given.
 
-	$s->cmdfile(sub{$s->runlcl("perl ./bin/smcmv.pl -vt $_") ||die $?>>8}
-		, './var-cmd/cmd-night-assign.txt', undef, 'cmd-log.txt');
-	$s->cmdfile(sub{$s->runlcl("perl ./bin/smcmv.pl -vt $_") ||die $?>>8}
+C<cmdfck> checks commands file for command rows present.
+If commands found, executes script or sub{} given once, for file names.
+
+Examples with L<Sys::Manage::Cmd|Sys/Manage/Cmd> script:
+
+	$s->runlog('perl', './bin/smcmv.pl', '-vct', '-gx', 'cmdfile'
 		, './var-cmd/cmd-night-do.txt', 'cmd-night-done.txt','cmd-log.txt');
 	$s->cmdfile(sub{$s->runlcl("perl ./bin/smcmv.pl -vt $_") ||die $?>>8}
-		, './var-cmd/cmd-night-sched.txt', undef, 'cmd-log.txt');
+		, './var-cmd/cmd-night-do.txt', 'cmd-night-done.txt','cmd-log.txt');
+	$s->cmdfck(sub{$s->runlcl("perl ./bin/smcmv.pl -vct -gx cmdfile $_")}
+		, './var-cmd/cmd-night-do.txt', 'cmd-night-done.txt','cmd-log.txt');
+	$s->cmdfck(sub{$s->runlog("perl ./bin/smcmv.pl -vct -gx cmdfile", @_)}
+		, './var-cmd/cmd-night-do.txt', 'cmd-night-done.txt','cmd-log.txt');
+
+	$s->runlog('perl', './bin/smcmv.pl', '-vct', '-gx', 'cmdfile'
+		, './var-cmd/cmd-night-assign.txt', '""', 'cmd-log.txt');
+	$s->runlog('perl', './bin/smcmv.pl', '-vct', '-gx', 'cmdfile'
+		, './var-cmd/cmd-night-sched.txt', '""', 'cmd-log.txt');
+
+
+
+=item daemonize ()
+
+Suppresses STDIN, STDOUT, STDERR and calls L<setsid|POSIX>.
+See L<perlipc|perlipc>.
+
 
 
 =item ftruncate (file name) -> success
@@ -520,6 +539,16 @@ Used internally for transition from system scheduler.
 =head1 VERSION
 
 =over
+
+=item  '2005-12-14'
+
+New C<cmdfck> method.
+
+
+=item '2005-11-25'
+
+Published 0.50 version.
+
 
 =item  '2005-09-15'
 
