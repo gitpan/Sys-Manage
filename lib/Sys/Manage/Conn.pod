@@ -846,6 +846,16 @@ Saved STDOUT file handle.
 
 =over
 
+=item '2005-12-26'
+
+C<fget> correction: manager file is created after agent file opened.
+
+
+=item '2005-12-20'
+
+Publishing 0.51 version.
+
+
 =item '2005-12-02'
 
 New C<agtfile> method and command.

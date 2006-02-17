@@ -21,7 +21,7 @@ use IO::Select;
 use Safe;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.51';
+$VERSION = '0.52';
 
 my $qlcl =0;	# quoting local args not needed because of shell quoting
 
@@ -361,7 +361,7 @@ sub agtsrc {		# Agent source
 
 sub agtfile {		# Agent source write
  my $s =shift;	# (?"-'?",filename) -> success
- my $o =$_[0] =~/^-(?:\w[\w\d+-]*)*$/ ? shift : '-';
+ my $o =$_[0] =~/^-(?:['"\w]['"\w\d+-]*)*$/ ? shift : '-';
  my $f =shift;
  if ($qlcl && ($o !~/'/)) {
 	$f =~s/([\\"])/\\$1/g;
@@ -632,7 +632,7 @@ sub getret {	# Get return of remote eval
 
 sub reval {	# Remote Eval perl code
  my $s =shift;	# (?"-'o-e-", perl strings, ?filter sub{}) -> return value
- my $o =$_[0] =~/^-(?:\w[\w\d+-]*)*$/ ? shift : '-';
+ my $o =$_[0] =~/^-(?:['"\w]['"\w\d+-]*)*$/ ? shift : '-';
  my $f =ref($_[$#_]) eq 'CODE' ? pop : undef;
  $s->connect if !$s->{''};
  $s->echo('reval','{...}', "\n") if $s->{-echo};
@@ -646,7 +646,7 @@ sub reval {	# Remote Eval perl code
 
 sub rcmd {	# Remote Run OS command
  my $s =shift;	# (?"-'o-e-", command and arguments, ?filter sub{}) -> success
- my $o =$_[0] =~/^-(?:\w[\w\d+-]*)*$/ ? shift : '-';
+ my $o =$_[0] =~/^-(?:['"\w]['"\w\d+-]*)*$/ ? shift : '-';
  my $f =ref($_[$#_]) eq 'CODE' ? pop : undef;
  $s->connect if !$s->{''};
  $s->echo('rcmd', join(' ', map{defined($_) ? (qclad($s,$_)) : ('undef')} $o, @_), "\n") 
@@ -661,7 +661,7 @@ sub rcmd {	# Remote Run OS command
 
 sub lcmd {	# Local OS command
  my $s =shift;	# (?"-", command and arguments, ?filter sub{}) -> success
- my $o =$_[0] =~/^-(?:\w[\w\d+-]*)*$/ ? shift : '-';
+ my $o =$_[0] =~/^-(?:['"\w]['"\w\d+-]*)*$/ ? shift : '-';
  my $f =ref($_[$#_]) eq 'CODE' ? pop : undef;
  $s->echo('lcmd', join(' '
 	, map{	defined($_) 
@@ -741,16 +741,17 @@ sub rxpnd0 {	# Expand list to evaluation string (base layer)
 sub rxpnd {	# Expand list to evaluation string (subsequent layer)
  my $s =shift;	# (?command, ?"-'", @args) -> perl string
  my $c =$_[0] =~/^(?:system\(|`|do[{'"]|eval[{'"])$/ ? shift : ($s->{-rxpnd0}||'');
- my $o =$_[0] =~/^-(?:\w[\w\d+-]*)*$/ ? shift : ($s->{-rxpnd1}||'');
+ my $o =$_[0] =~/^-(?:['"\w]['"\w\d+-]*)*$/ ? shift : ($s->{-rxpnd1}||'');
  if ($c =~/^(system)/) {
 	local $s->{-rxpnd0} ='do{';
 	local $s->{-rxpnd1} =$o;
+	my $w =$1;
 	my $q =$o=~/'/ ? "'" : '"';
-	$1 .'(' .join(','
+	$w .'(' .join(','
 		, map {	  ref($_)
 			? $s->rxpnd(@$_)
 			: !defined($_)
-			? undef
+			? ''
 			: do {	my $v =$_;
 				$v =~s/[\n\r]//g;
 				$v =~s/\\/\\\\/g;
@@ -766,12 +767,13 @@ sub rxpnd {	# Expand list to evaluation string (subsequent layer)
  elsif ($c =~/^(`)/) {
 	local $s->{-rxpnd0} ='do{';
 	local $s->{-rxpnd1} =$o;
+	my $w =$1;
 	my $q ='"';
-	$1 .join(' '
+	$w .join(' '
 		, map {	  ref($_)
 			? $s->rxpnd(@$_)
 			: !defined($_)
-			? undef
+			? ''
 			: do {	my $v =$_;
 				$v =~s/[\n\r]//g;
 				$v =~s/\\/\\\\/g;
@@ -788,7 +790,7 @@ sub rxpnd {	# Expand list to evaluation string (subsequent layer)
 		, map {   ref($_)
 			? $s->rxpnd(@$_)
 			: !defined($_)
-			? undef
+			? ''
 			: do {	my $v =$_;
 				$v =~s/[\n\r]//g;
 				$v
@@ -808,7 +810,7 @@ sub rxpnd {	# Expand list to evaluation string (subsequent layer)
 
 sub fget {	# Get remote file
  my $s =shift;	# (?"-'m+b-s+z+", remote file, local file, postfix) -> success
- my $o =$_[0] =~/^-(?:\w[\w\d+-]*)*$/ ? shift : '-';
+ my $o =$_[0] =~/^-(?:['"\w]['"\w\d+-]*)*$/ ? shift : '-';
  my ($fa, $fm, @ps) =@_;
  $s->connect if !$s->{''};
  if ($qlcl && ($o !~/'/) && ($o !~/s(?![0-])/)) {
@@ -836,9 +838,6 @@ sub fget {	# Get remote file
 		$fz =$fm;
 		$fm =$s->{-tmp} .'.' .$s->sarcfe()
  	}
-	eval('use IO::File');
-	$fh =IO::File->new($fm,'w')
-	|| return($s->error("fget: open '$fm': $!"));
  }
  my $cr ='{open(STDOUT,\'>&OLDOUT\');'
 	.'use IO::File;'
@@ -894,6 +893,8 @@ sub fget {	# Get remote file
 	$s->{-agent}->read($fm, $fl);
 	return(!$s->getret() ||$s->{-erreval} ? undef : $fm)
  }
+ $fh =eval('use IO::File; 1') && IO::File->new($fm,'w')
+	|| return($s->error("fget: open '$fm': $!"));
  binmode($fh) if $o !~/b[0-]/;
  $s->echo('fget', qclad($s,$fm), " ($fl/$op)") if $s->{-progress} && $s->{-echo};
  my $fb; my $fc=0; my $ft;
@@ -928,7 +929,7 @@ sub fget {	# Get remote file
 
 sub fput {	# Put remote file
  my $s =shift;	# (?"-'m+b-s+z+", local file, remote file, ?postfix, ?filter) -> success
- my $o =$_[0] =~/^-(?:\w[\w\d+-]*)*$/ ? shift : '-';
+ my $o =$_[0] =~/^-(?:['"\w]['"\w\d+-]*)*$/ ? shift : '-';
  my ($fm,$fa,@ps) =@_;
  my $fe =scalar(@ps) && (ref($ps[$#ps]) eq 'CODE') ? pop @ps : undef;
  $s->connect if !$s->{''};
@@ -968,8 +969,7 @@ sub fput {	# Put remote file
 	$fs =[stat $fm];
 	return($s->error("fput: not readable '$fm'"))
 		if !$fs || (!-f $fm) ||(!-r $fm);
-	eval('use IO::File');
-	$fh =IO::File->new($fm,'r')
+	$fh =eval('use IO::File; 1') && IO::File->new($fm,'r')
 		|| return($s->error("fput: open '$fm': $!"));
  }
  my $cr ='{open(STDOUT,\'>&OLDOUT\');'
@@ -1069,7 +1069,7 @@ sub rfput {	# Put remote file (alias)
 
 sub rfwrite {	# Write remote file
  my $s =shift;	# (?"-'b-", remote file, data) -> success
- my $o =$_[0] =~/^-(?:\w[\w\d+-]*)*$/ ? shift : '-';
+ my $o =$_[0] =~/^-(?:['"\w]['"\w\d+-]*)*$/ ? shift : '-';
     $o =~s/s[\d+-]//g;
     $o .='s+';
  $s->fput($o,$_[$#_],@_ >2 ? join("\n", @_[0..$#_-1]) : $_[0]);
@@ -1078,7 +1078,7 @@ sub rfwrite {	# Write remote file
 
 sub lfwrite {	# Write local file
  my $s =shift;	# ('-b-',filename, strings) -> success
- my $o =$_[0] =~/^-(?:\w[\w\d+-]*)*$/ ? shift : '-';
+ my $o =$_[0] =~/^-(?:['"\w]['"\w\d+-]*)*$/ ? shift : '-';
  my $f =$_[0]; $f ='>' .$f if $f !~/^[<>]/;
  $s->echo('lfwrite', qclad($s,$o), ' ', qclad($s,$f),"\n") if $s->{-echo};
  local *FILE;  open(FILE, $f) || return($s->error("lfwrite: cannot open '$f': $!"));
@@ -1097,7 +1097,7 @@ sub lfwrite {	# Write local file
 
 sub rfread {	# Read remote file
  my $s =shift;	# (?"-'b-", remote file) -> content
- my $o =$_[0] =~/^-(?:\w[\w\d+-]*)*$/ ? shift : '-';
+ my $o =$_[0] =~/^-(?:['"\w]['"\w\d+-]*)*$/ ? shift : '-';
     $o =~s/s[\d+-]//g;
     $o .='s+';
  $s->fget($o,$_[0]);
@@ -1107,7 +1107,7 @@ sub rfread {	# Read remote file
 
 sub lfread {	# Read local file
  my $s =shift;	# (?"-'b-", file) -> content
- my $o =$_[0] =~/^-(?:\w[\w\d+-]*)*$/ ? shift : '-';
+ my $o =$_[0] =~/^-(?:['"\w]['"\w\d+-]*)*$/ ? shift : '-';
  my($f,$f0) =($_[0],$_[0]); 
 	if ($f =~/^[<>]+/)	{$f0 =$'}
 	else			{$f  ='<' .$f}
@@ -1132,7 +1132,7 @@ sub sarcfe {	# String: Arc: File Extension
 
 sub sarcmk {	# String: Arc: Make
  my $s =shift;	# (?"-mt", source var, target var) -> perl string
- my $o =$_[0] =~/^-(?:\w[\w\d+-]*)*$/ ? shift : '-';
+ my $o =$_[0] =~/^-(?:['"\w]['"\w\d+-]*)*$/ ? shift : '-';
  my $z =$s->{-pack} ||'zip';
     $z =~s/\\/\\\\/g;
  my($zs,$zt) =@_;
@@ -1187,7 +1187,7 @@ sub sarcmk {	# String: Arc: Make
 
 sub sarcxt {	# String: Arc: Extract
  my $s =shift;	# (?"-mt", source var, target var) -> perl string
- my $o =$_[0] =~/^-(?:\w[\w\d+-]*)*$/ ? shift : '-';
+ my $o =$_[0] =~/^-(?:['"\w]['"\w\d+-]*)*$/ ? shift : '-';
  my $z =$s->{-packx} ||$s->{-pack} ||'zip';
 	if(!ref($z)) {
 		$z =~s/\\/\\\\/g;
@@ -1229,7 +1229,7 @@ sub sarcxt {	# String: Arc: Extract
 sub rdo {	# Remote do
  my $s =shift;	# (?"-e-e!#@o-z+", local file, ?@args, ?filter) -> result
 		# (?"-e-e!#@o-z+", ?@interpreter, '!', local file, ?@args, ?filter) -> result
- my $o =$_[0] =~/^-(?:\w[\w\d!@#+-]*)*$/ ? shift : '-';
+ my $o =$_[0] =~/^-(?:['"\w]['"\w\d!@#+-]*)*$/ ? shift : '-';
     $o =~s/'//g;
  my $m =$o =~/e([!@#])$/ ? $1 : '!';
  my $b =ref($#_) eq 'CODE' ? pop : undef;

@@ -26,6 +26,11 @@ under the same terms as Perl itself.
 =over
 
 
+=item '2006-02-17'
+
+Publishing 0.52 version, some corrections made.
+
+
 =item '2005-12-20'
 
 Publishing 0.51 version.
