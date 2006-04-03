@@ -1,6 +1,6 @@
 @echo off
 @if not exist %0 set 0=%0.bat
-perl -w -x -S %0 %1 %2 %3 %4 %5 %6 %7 %8 %9
+perl -w -x -S %0 %*
 @exit %ERRORLEVEL%
 @goto endofperl
 #!perl -w

@@ -21,7 +21,7 @@ use IO::Select;
 use Safe;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.52';
+$VERSION = '0.53';
 
 my $qlcl =0;	# quoting local args not needed because of shell quoting
 
@@ -654,7 +654,7 @@ sub rcmd {	# Remote Run OS command
  local $s->{-rxpnd0} ='system{';
  local $s->{-rxpnd1} =$o;
  $s->reval0($s->rxpnd0(@_))
- && $s->getret(ref($f) ? ref($f) : ())
+ && $s->getret(ref($f) ? $f : ())
  && (!$s->{-errexit})
 }
 
