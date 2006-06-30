@@ -114,16 +114,17 @@ sub strtime {		# Log time formatter
 
 sub qclad {		# Quote command line arg(s) on demand
 	map {	!defined($_) || ($_ eq '')
-		? '""'
+		? qclat($_[0], $_)
 		: /[&<>\[\]{}^=;!'+,`~\s%"?*|()]/	# ??? see shell
-		? do {	my $v =$_; $v =~s/"/\\"/g; '"' .$v .'"' }
+		? qclat($_[0], $_)
 		: $_ } @_[1..$#_]
 }
 
 
 sub qclat {		# Quote command line arg(s) total
 	map {	my $v =defined($_) ? $_ : '';
-		$v =~s/"/\\"/g;
+		$v =~s/"/\\"/g;				# ??? perl specific
+		$v =~s/\\$/\\\\/;
 		'"' .$v .'"'
 		} @_[1..$#_]
 }

@@ -16,7 +16,7 @@ use IO::File;
 use Fcntl qw(:DEFAULT :flock :seek :mode);
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.53';
+$VERSION = '0.54';
 
 1;
 
@@ -74,7 +74,10 @@ sub qclad {		# Quote command line arg(s) on demand
 	map {	!defined($_) || ($_ eq '')
 		? '""'
 		: /[&<>\[\]{}^=;!'+,`~\s%"?*|()]/	# ??? see shell
-		? do {	my $v =$_; $v =~s/"/\\"/g; '"' .$v .'"' }
+		? do {	my $v =$_;
+			$v =~s/"/\\"/g;			# ??? perl specific
+			$v =~s/\\$/\\\\/;
+			; '"' .$v .'"' }
 		: $_ } @_[1..$#_]
 }
 

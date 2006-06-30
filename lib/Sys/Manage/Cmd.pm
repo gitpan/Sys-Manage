@@ -20,7 +20,7 @@ use POSIX qw(:sys_wait_h);
 use Data::Dumper;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.53';
+$VERSION = '0.54';
 
 1;
 
@@ -351,16 +351,17 @@ sub qclad {		# Quote command line arg(s) on demand
 		# & < > [ ] { } ^ = ; ! ' + , ` ~ [white space]
 		# Shell: see execvp(3) - for args list processing
 		!defined($_) || ($_ eq '')
-		? '""'
+		? qclat($_[0], $_)
 		: /[&<>\[\]{}^=;!'+,`~\s%"?*|()]/	# ??? see shell
-		? do {	my $v =$_; $v =~s/"/\\"/g; '"' .$v .'"' }
+		? qclat($_[0], $_)
 		: $_ } @_[1..$#_]
 }
 
 
 sub qclat {		# Quote command line arg(s) totally
 	map {	my $v =defined($_) ? $_ : '';
-		$v =~s/"/\\"/g;
+		$v =~s/"/\\"/g;				# ??? perl specific
+		$v =~s/\\$/\\\\/;
 		'"' .$v .'"'
 		} @_[1..$#_]
 }
@@ -994,7 +995,7 @@ sub execute {		# Execute command (target action) with current options
 			,"-b$b", "-ob", ('-k' .$s->{-ckind})
 			,($s->{-cassign} ? ('-a' .$s->{-cassign}) : ("-r$cid"))
 			,(ref($s->{-ctarget}) ? map {"-t$_"} @{$s->{-ctarget}} : ('-t' .$s->{-ctarget}))
-			,(ref($s->{-cxtgt}) ? map {"-x$_"} @{$s->{-cxtgt}} : defined($s->{-cxtgt}) ? ('-t' .$s->{-cxtgt}) :())
+			,(ref($s->{-cxtgt}) ? map {"-x$_"} @{$s->{-cxtgt}} : defined($s->{-cxtgt}) ? ('-x' .$s->{-cxtgt}) :())
 			,($s->{-cignor} ? '-i' : ())
 			,($s->{-vgxf} ? ('-gx' .$s->{-vgxf}) : ())
 			,($s->{-ping} ? ('-g' .$s->{-pingtime}) : ())
@@ -1005,7 +1006,7 @@ sub execute {		# Execute command (target action) with current options
 			if !$s->{-echol} ||($s->{-echol} >1);
 		(system(1, $s->qclad($^X)
 			, ($0 =~/\.(?:bat|cmd)$/i ? ('-x') : ())
-			, $s->qclat(@arg)) == -1)
+			, $s->qclad(@arg)) == -1)
 		&& return($s->error("system(Branching) -> $!"));
 	}
 	$order ='s' if scalar(@brtgt) && !$brcnt;
@@ -1200,7 +1201,7 @@ sub execute {		# Execute command (target action) with current options
 		,('-k' .$s->{-ckind})
 		,($s->{-cassign} ? ('-a' .$s->{-cassign}) : ("-r$cid"))
 		,(ref($s->{-ctarget}) ? map {"-t$_"} @{$s->{-ctarget}} : ('-t' .$s->{-ctarget}))
-		,(ref($s->{-cxtgt}) ? map {"-x$_"} @{$s->{-cxtgt}} : defined($s->{-cxtgt}) ? ('-t' .$s->{-cxtgt}) :())
+		,(ref($s->{-cxtgt}) ? map {"-x$_"} @{$s->{-cxtgt}} : defined($s->{-cxtgt}) ? ('-x' .$s->{-cxtgt}) :())
 		,($s->{-cignor} ? '-i' : ())
 		,($s->{-ping} ? ('-g' .$s->{-pingtime}) : ())
 		,($s->{-echo} ? ('-v' .$s->{-echo}) : ())

@@ -25,10 +25,15 @@ under the same terms as Perl itself.
 
 =over
 
+=item '2006-04-24'
+
+C<qclad>/C<qclat> changed considering backslash tail.
+Also C<qclad> uses C<qclat> now.
+
 
 =item '2006-04-03'
 
-Publishing 0.51 version, some corrections made.
+Publishing 0.53 version, some corrections made.
 
 
 =item '2006-02-17'

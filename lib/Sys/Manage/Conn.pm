@@ -21,7 +21,7 @@ use IO::Select;
 use Safe;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.53';
+$VERSION = '0.54';
 
 my $qlcl =0;	# quoting local args not needed because of shell quoting
 
@@ -204,23 +204,24 @@ sub set {               # Get/set slots of object
 }
 
 
-sub isqclad {		# May need shell quote command line arg???
-	$_[1] =~/[&<>\[\]{}^=;!'+,`~\s%"?*|()]/
+sub isqclad {		# May need shell quote command line arg
+	$_[1] =~/[&<>\[\]{}^=;!'+,`~\s%"?*|()]/	# ??? see shell
 }
 
 
 sub qclad {		# Quote command line arg(s) on demand
 	map {	!defined($_) || ($_ eq '')
-		? '""'
+		? qclat($_[0], $_)
 		: isqclad($_[0],$_)
-		? do {	my $v =$_; $v =~s/"/\\"/g; '"' .$v .'"' }
+		? qclat($_[0], $_)
 		: $_ } @_[1..$#_]
 }
 
 
 sub qclat {		# Quote command line arg(s) totally
 	map {	my $v =defined($_) ? $_ : '';
-		$v =~s/"/\\"/g;
+		$v =~s/"/\\"/g;			# ??? perl specific
+		$v =~s/\\$/\\\\/;
 		'"' .$v .'"'
 		} @_[1..$#_]
 }
@@ -683,8 +684,7 @@ sub lcmd {	# Local OS command
 						$v =~s/([\\"])/\\$1/g;
 						$v =eval('"' .$v .'"');
 					}
-					$v =~s/"/\\"/g;
-					'"' .$v .'"'}
+					qclad($s, $v)}
 				: $_ } @_);
 	if ($pid) {
 		local $_;
@@ -711,8 +711,7 @@ sub lcmd {	# Local OS command
 					$v =~s/([\\"])/\\$1/g;
 					$v =eval('"' .$v .'"');
 				}
-				$v =~s/"/\\"/g;
-				'"' .$v .'"'}
+				qclad($s, $v)}
 			: $_ } @_) ==-1)
 		&& return($s->error('lcmd:',$!))
 
@@ -756,8 +755,7 @@ sub rxpnd {	# Expand list to evaluation string (subsequent layer)
 				$v =~s/[\n\r]//g;
 				$v =~s/\\/\\\\/g;
 				if ((scalar(@_) >1) && isqclad($s,$v)) {
-					$v =~s/"/\\"/g;
-					$v ='"' .$v .'"';
+					$v =qclad($s, $v);
 				}
 				$v =~s/\Q$q\E/\\$q/g;
 				"$q$v$q"
@@ -1254,7 +1252,7 @@ sub rdo {	# Remote do
 	: ($f,'${t_}' .$e, '${t_}' .$e);
  my $q =sub{join(',', map {my $v =$_; $v =~s/(["\\])/\\$1/g; "\"$v\""} @_)};
  my $qq=sub{join(',', map {isqclad($s, $_)
-				? &$q(do{my $v=$_; $v=~s/"/\\"/g; "\"$v\""}) 
+				? &$q(qclat($s, $_))
 				: &$q($_) } @_)};
  $s->echo('rdo', join(' '
 			, map {	defined($_) ? (qclad($s,$_)) : ('undef')
