@@ -55,16 +55,19 @@ Sys::Manage::Conn - Connection to remote Perl
 		lcmd	?-		os-command	argumets-list
 		rdo	?-o-e-p		?os-command !	local-script	?args
 		fget	?-'mp		remote-source	local-target
+		mget	?-'mr		remote-dir	local-dir	mask	?seconds
 		fput	?-'mp		local-source	remote-target
+		mput	?-'mr		local-dir	remote-dir	mask	?seconds
 		agtfile	?-l		agent-script
 
 		where:
 			-'	quote remote arg with "'"
 			-o-	refuse STDOUT
 			-e-	refuse STDERR
-			-p, -z	pack file(s)
-			-l	loop agent script
 			-m	move file(s)
+			-p, -z	pack file(s)
+			-r	recurse subdirectories
+			-l	loop agent script
 
 =back
 
@@ -369,6 +372,22 @@ Remote agent TCP/IP port number to listen by L<IO::Socket::INET|IO/Socket/INET>.
 See also C<-node>.
 
 
+
+=item -reject
+
+	=> undef | sub{}(self, method, options, argument,...) -> reject message
+
+Commands reject condition.
+May be useful supplying L<Sys::Manage::Cmd|Sys/Manage/Cmd> service to suboperators.
+
+L<$ENV{SMCFP}|Sys/Manage/CmdFile>,
+L<$ENV{SMELEM}|Sys/Manage/Cmd>,
+L<$ENV{SMLIB}|Sys/Manage/Cmd>
+may be mentioned in conditions.
+
+See also L<Sys::Manage::Cmd -reject|Sys/Manage/Cmd>.
+
+
 =item -reteval
 
 	=> value or data structure
@@ -419,7 +438,55 @@ Default is current user.
 
 	=> undef | WMI object
 
-WMI L<Win32::OLE|Win32/OLE> connection, if opened by C<connect>.
+Windows WMI L<Win32::OLE|Win32/OLE> connection, if opened by C<connect>.
+
+
+=item -wmisil
+
+	=> undef | 4 | 3 | [4,3]
+
+Windows WMI security impersonation level(s) to use.
+See MSDN 'Platform SDK: Windows Management Instrumentation'.
+
+4 - delegate.
+Allows objects to permit other objects to use the credentials of the caller.
+Windows 2000 and later.
+In 'Active Directory Users and Computers'
+the account of Agent computer must be marked as 'Trusted for delegation'
+and the account of Manager computer must not be marked as 'Account is sensitive and cannot be delegated'.
+Manager computer, agent computer and the domain controller must be members of the same domain or in trusted domains.
+See MSDN 'Connecting to a 3rd Computer-Delegation'.
+
+3 - impersonate. 
+Allows objects to use the credentials of the caller.
+Recommended in MSDN for Scripting API for WMI calls.
+See MSDN 'Setting the Default Process Security Level Using VBScript'.
+
+[4,3] - start with 4 and decrease to 3 if security error.
+
+undef - default encoded in C<connect>, 3 without password, [4,3] with password,
+alike some Windows utilities behaviour.
+
+
+=item -wmisis
+
+	=> undef | 1
+
+Start agent as a Windows service using 'System' account and interacting with desktop.
+
+Ignored for agent computers without 'Win32_Service' WMI class.
+
+To allow access from agent to network shares on file server
+special Registry parameters may be required (see in Microsoft Technet):
+
+	'HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\LanmanServer\Parameters\NullSessionShares' (REG_MULTI_SZ) = share-names
+	'HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\LSA\RestrictAnonymous' (REG_DWORD) = 0
+
+C<connect> automatically installs service 'Sys-Manage-C<-chkip>.pl' if it is not already exists.
+Required files are written to '$ENV{SystemRoot}\System32' directory during installation:
+
+	'instsrv.exe' and 'srvany.exe' Windows Resource Kit utilities, if not already exists.
+	'Sys-Manage*.pl' agent script.
 
 
 =back
@@ -526,6 +593,49 @@ See also C<rfwrite>, C<lfread>.
 
 
 
+=item lls (?-options, path, ?filter, ?attr get, ?container''[]{}) -> list || success
+
+Lists local directory.
+Returns list or container given, undefined on error.
+Container may be string, hash ref, array ref.
+Additional directory entry attributes may be get using 'sub{}(path,$_=name,file)' or 'expr'.
+Directory entries may be filtered using 'sub{}(path,name,$_=file)' or 'mask'.
+Path may be evaluated using 'sub{}' or 'do{}'.
+
+See also C<rls>.
+
+
+
+=item mget (?-options, remote dir, local dir, ?filter, ?time limit) -> success
+
+Replicates multiple remote files to local side.
+Directory entries may be filtered using 'sub{}(path,name,$_=file)' or filemask syntax.
+Limit of time to spend may be specified in seconds.
+
+Example:
+$s->mget('C:\\tmp','c:\\tmp\\1','sub{/\\.(doc|ppt)/}');
+
+Used C<METHOD CALL OPTIONS>: C<-'>, C<-m>, C<-r>.
+
+See also C<fget>, C<mput>.
+
+
+
+=item mput (?-options, local dir, remote dir, ?filter, ?time limit) -> success
+
+Replicates multiple local files to remote side.
+Directory entries may be filtered using 'sub{}(path,name,$_=file)' or filemask syntax.
+Limit of time to spend may be specified in seconds.
+
+Example:
+$s->mput('C:\\tmp','c:\\tmp\\1','sub{/\\.(doc|ppt)/}');
+
+Used C<METHOD CALL OPTIONS>: C<-'>, C<-m>, C<-r>.
+
+See also C<fput>, C<mget>.
+
+
+
 =item new ('class', -option=>value,...) -> new object
 
 =item new ('class', [command line arguments], -option=>value,...) -> new object
@@ -605,6 +715,23 @@ Default C<REMOTE SOURCE EXPANSION>: C<do{>.
 
 See also C<lfwrite>, C<rfput>, C<rfread>.
 
+
+
+=item rls (?-options, remote path, ?filter, ?attr get, ?container''[]{}) -> list || success
+
+Lists remote directory.
+Returns list or container given, undefined on error.
+Container may be string, hash ref, array ref.
+Additional directory entry attributes may be get using 'sub{}(path,$_=name,file)' or 'expr'.
+Directory entries may be filtered using 'sub{}(path,name,$_=file)' or 'mask'.
+Remote path may be evaluated using 'sub{}' or 'do{}'.
+
+Example:
+$s->rls('sub{"c:\\\\tmp"}','*.xml','stat $_')
+
+Used C<METHOD CALL OPTIONS>: C<-'>, C<-o->, C<-e->.
+
+See also C<lls>.
 
 
 =item set () -> (slot names of the object)
@@ -715,6 +842,15 @@ Remain remote STDOUT unredirected.
 Use C<-pack> archiver to compress source 
 for transfer and extract into target directory.
 C<fput> does not uses archiver if local file is already packed.
+
+
+=item -r
+
+=item -r+
+
+=item -r1
+
+'r'ecurse (subdirectories).
 
 
 =item -s
@@ -845,6 +981,43 @@ Saved STDOUT file handle.
 =head1 VERSION
 
 =over
+
+=item '2007-02-13'
+
+Fixed error indicators ($!, $^E, $@) transfer translating [\n\r\t].
+
+Fixed C<-wmisis> agent file.
+
+Fixed C<mget>/C<mput> recurse.
+
+
+=item '2007-02-01'
+
+New C<-reject>.
+
+New C<-wmisis>, changed C<connect>.
+
+
+=item '2007-01-30'
+
+New C<-wmisil>, changed C<connect>.
+
+
+=item '2007-01-29'
+
+New C<mput> and C<mget> methods.
+
+
+=item '2007-01-26'
+
+New C<rls> and C<lls> methods.
+
+
+=item '2007-01-24'
+
+C<connect> fixed
+automatically decreasing WMI ImpersonationLevel from 4 to 3 when security error.
+
 
 =item '2005-12-26'
 

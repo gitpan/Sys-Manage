@@ -25,6 +25,70 @@ under the same terms as Perl itself.
 
 =over
 
+
+=item '2007-03-09'
+
+Publishing 0.55 version.
+
+
+=item '2007-03-07'
+
+Changed L<Sys::Manage::CmdEscort|Sys/Manage/CmdEscort>
+- added runtime hardlinks from './log-' files to './var' directory
+- for monitoring and diagnostics during runtime.
+
+New L<Sys::Manage::Schedule -logpid|Sys/Manage/Schedule>
+to create runtime pid file for monitoring and diagnostics during runtime.
+
+
+=item '2007-02-13'
+
+Fixed L<Sys::Manage::Conn|Sys/Manage/Conn>
+error indicators ($!, $^E, $@) transfer translating [\n\r\t].
+
+Fixed L<Sys::Manage::Conn -wmisis|Sys/Manage/Conn> agent file.
+
+
+=item '2007-02-01'
+
+New L<Sys::Manage::Conn -reject|Sys/Manage/Conn> paramerter
+in addition to L<Sys::Manage::Cmd -reject|Sys/Manage/Cmd>.
+
+New L<Sys::Manage::Conn -wmisis|Sys/Manage/Conn> paramerter
+to use agent as Windows service.
+
+
+=item '2007-01-30'
+
+New L<Sys::Manage::Conn -wmisil|Sys/Manage/Conn> paramerter
+to describe Windows WMI impersonation.
+
+
+=item '2007-01-29'
+
+New L<Sys::Manage::Conn::mput|Sys/Manage/Conn> and L<Sys::Manage::Conn::mget|Sys/Manage/Conn> methods.
+
+New L<Sys::Manage::Cmd mput|Sys/Manage/Cmd> and L<Sys::Manage::Cmd mget|Sys/Manage/Cmd> commands.
+
+
+=item '2007-01-26'
+
+New L<Sys::Manage::Conn::rls|Sys/Manage/Conn> and L<Sys::Manage::Conn::lls|Sys/Manage/Conn> methods.
+
+L<Sys::Manage::Cmd|Sys/Manage/Cmd> description of quoting corrected.
+
+L<Sys::Manage::Cmd|Sys/Manage/Cmd> internal command line escaping implemented.
+
+L<Sys::Manage::Conn::connect|Sys/Manage/Conn> fixed
+automatically decreasing WMI ImpersonationLevel from 4 to 3 when security error.
+
+
+
+=item '2006-06-30'
+
+Publishing 0.54 version, some corrections made.
+
+
 =item '2006-04-24'
 
 C<qclad>/C<qclat> changed considering backslash tail.

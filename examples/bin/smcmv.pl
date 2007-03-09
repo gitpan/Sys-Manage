@@ -34,7 +34,7 @@
 #	-vt...		- ... date-time include
 #
 # Predefined commands:
-#	see 'smrmt' script: 'rcmd', 'rdo', 'fput', 'fget' with options.
+#	see 'smrmt' script: 'rcmd', 'rdo', 'fput', 'fget', 'mput', 'mget' with options.
 #	see 'cmdfile'.
 #
 use Sys::Manage::Cmd;

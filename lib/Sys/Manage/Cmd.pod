@@ -39,9 +39,19 @@ Sys::Manage::Cmd - Systems management command volley
 =item Command line
 
 	script -option -option... target command-line
+	script -option...   -ttarget...  command-line
 
+=item Examples of command line
+
+	script		  all		dir !elem!
+	script -ob	-tall		dir !elem!
+	script -rPrevId	-tall		dir !elem!
+	script -aTest	-tall		dir !elem!
+	script -l10	-tall		dir !elem!
 
 =item Options of command line
+
+(see also C<-cline> and C<-i>, C<-k>, C<-l>, C<-o>, C<-r>, C<-t>, C<-u>, C<-x>, C<-v>, C<-g>)
 
 	-kNameSpace	- kind (namespace) of command
 	-rCommandId	- redo command id (used also inside '-l'); or switch (for '-a')
@@ -65,22 +75,20 @@ Sys::Manage::Cmd - Systems management command volley
 
 =item Embedded commands
 
+(see also C<-cline> and C<-assoc>)
+
 	script.ext	- interpreting of scripts alike '.pl', '.bat', '.ftp', '.rdo.*'
-	rcmd, rdo,	- commands to remote nodes
-	fput, fget		using Sys::Manage::Conn
+	rcmd, rdo,	- commands to remote nodes using
+	fput, fget,		Sys::Manage::Conn
+	mput, mget		(!elem!, !user!, !pswd! substitutions not needed)
 	cmdfile		- evaluate command lines file or Perl script
 	!elem!, <	- target element and source file substitutions
-
-
-=item Examples of command line
-
-	script		  all		dir !elem!
-	script -ob	-tall		dir !elem!
-	script -rPrevId	-tall		dir !elem!
-	script -aTest	-tall		dir !elem!
-	script -l10	-tall		dir !elem!
+	!user!, !pswd!	- user name and password substitutions
+	!log!		- log filesystem name substitution
 
 =item Embedding command line
+
+(see also C<ENVIRONMENT> and C<SLOTS>)
 
 	if (!defined($ENV{SMELEM})	# command volley:
 	|| ($ENV{SMELEM} eq '')) {
@@ -340,7 +348,8 @@ as considered in C<ENVIRONMENT>.
 Command line or command line template to be executed.
 
 
-B<Command script search path> (see also C<ENVIRONMENT>):
+B<Command script search path> (see also C<ENVIRONMENT>)
+
 If command file (the first command line element usually) 
 is not found with L<-f|perlfunc> operation,
 C<-dirb>/lib-C<-ckind>, C<-dirb>/lib, C<-dirb>/bin paths tried.
@@ -378,15 +387,25 @@ B<L<Sys::Manage::Conn|Sys/Manage/Conn> commands> (implemented via C<-assoc>):
 'fput', 'fget'.
 
 
-B<Quoting or escaping of command line arguments>: 
-Forming command line, any argument will be (re)quoted automatically 
-if special characters found.
-L<Sys::Manage::Conn::rdo|Sys/Manage/Conn> arguments will be (re)quoted automatically.
+B<Quoting or escaping of command line arguments>
+
+There are no uniform quoting/escaping rules for any platform or application.
+So automatic quoting/escaping may result ill-posedness.
+But it is handy to quote source command line elements only once.
+
+This module automatically quotes/escapes target command line elements if special characters found.
+Trustworthy internal escaping for internal command lines (branching, concurrenting, looping) may be used.
+
+L<Sys::Manage::Conn::rcmd|Sys/Manage/Conn>
+and L<Sys::Manage::Conn::rdo|Sys/Manage/Conn> arguments
+will be (re)quoted automatically.
+
 Single L<Sys::Manage::Conn::rcmd|Sys/Manage/Conn> argument 
 will not be (re)quoted automatically to allow rich shell command lines.
 
 
-B<Exit code>:
+B<Exit code>
+
 Usually exit code of the command is $?>>8 and 0 is treated as success.
 Scripts be evaluating (via 'do', 'eval' or '-e') 
 should return true value on success,
@@ -494,7 +513,7 @@ Will be expanded using C<-target>.
 
 	=> base directory
 
-Base directory for volley script execution.
+Base (root) directory for volley script execution.
 Default via $0.
 See also C<ENVIRONMENT>.
 
@@ -608,7 +627,12 @@ Commands reject condition.
 May be useful supplying service to suboperators 
 through L<Sys::Manage::CmdFile|Sys/Manage/CmdFile>.
 
-L<$ENV{SMCFP}|Sys/Manage/CmdFile>, C<istarget>, C<isscript> may be mentioned in conditions.
+L<$ENV{SMCFP}|Sys/Manage/CmdFile>,
+{C<-cline>}->[0] and other C<-cline> elements, 
+C<istarget>, C<isscript>
+may be mentioned in conditions.
+
+See also L<Sys::Manage::Conn -reject|Sys/Manage/Conn>.
 
 Example:
 
@@ -765,9 +789,9 @@ subsequent branch or loop may be executed implicitly.
 
 $ENV{SMCFP}	- from L<Sys::Manage::CmdFile|Sys/Manage/CmdFile>.
 
-$ENV{SMDIR}	- base directory for volley script execution, C<-dirb>. May be used as sign of flow under L<Sys::Manage::Cmd|Sys/Manage/Cmd> but not L<Sys::Manage::Conn::rdo|Sys/Manage/Conn>.
+$ENV{SMDIR}	- base (root) directory for volley script execution, C<-dirb>. May be used as sign of flow under L<Sys::Manage::Cmd|Sys/Manage/Cmd>.
 
-$ENV{SMELEM}	- target element name. May be used as sign of flow under L<Sys::Manage::Cmd|Sys/Manage/Cmd> or L<Sys::Manage::Conn::rdo|Sys/Manage/Conn>.
+$ENV{SMELEM}	- target element name. May be used as sign of flow under L<Sys::Manage::Cmd|Sys/Manage/Cmd> or L<Sys::Manage::Conn agent|Sys/Manage/Conn>.
 
 $ENV{SMLIB}	- directory of command script executing, if found.
 
@@ -799,6 +823,25 @@ $ENV{SMUSER}	- target element user.
 =head1 VERSION
 
 =over
+
+
+=item '2007-03-07'
+
+Changed L<Sys::Manage::CmdEscort|Sys/Manage/CmdEscort>
+- added runtime hardlinks from './log-' files to './var' directory
+- for monitoring and diagnostics during runtime.
+
+
+=item '2007-01-29'
+
+New L<Sys::Manage::Conn mput|Sys/Manage/Conn> and L<Sys::Manage::Conn mget|Sys/Manage/Conn> commands.
+
+
+=item '2007-01-25'
+
+Description of quoting corrected in C<-cline>.
+
+Internal command line escaping implemented.
 
 
 =item '2005-12-18'

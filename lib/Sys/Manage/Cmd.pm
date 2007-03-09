@@ -20,7 +20,7 @@ use POSIX qw(:sys_wait_h);
 use Data::Dumper;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.54';
+$VERSION = '0.55';
 
 1;
 
@@ -89,7 +89,7 @@ sub initialize {	# Initialize newly created object
 			,'.cmd'	=>['cmd.exe','/c']
 			,'.ftp'	=>sub{['ftp','-n','!elem!','<',$_[1]->[0]]}
 				#'.ftp'	=>sub{['ftp','-n','-s:loginfile','!elem!','<',$_[1]->[0]]}
-			,'rcmd'	=>['-e', 'Sys::Manage::Conn->connect([@ARGV],-v=>2,-e=>1,-cfg=>1)','!elem!',['!user!:!pswd!']]
+			,'rcmd'	=>['-e', 'Sys::Manage::Conn->connect([@ARGV],-v=>2,-e=>1,-cfg=>1,-esc=>1)','!elem!',['!user!:!pswd!']]
 				# ['-e' due to 'END{' | 'eval' reducing processes
 				# see 'execute': rdo fput fget
 			}
@@ -114,6 +114,7 @@ sub initialize {	# Initialize newly created object
 	#-cxtgt		=>[]		# -x	# cmd target exclusions
 	#-cuser		=>undef		# -u	# cmd user:password
 	#-cignor	=>undef		# -i	# cmd exit code ignoring
+	#-esc		=>undef		# -esc	# cmd line escaped
 	,-cline		=>[]		# ...	# cmd line
 	#-cid		=>undef			# cmd result id
 	#-cerr		=>undef			# cmd result errors
@@ -258,12 +259,17 @@ sub set {               # Get/set slots of object
 		$opt{-echo} =$v	if !(exists $opt{-echo});
 		$opt{-echol}=$v =~/(\d+)/ ? $1 : 2;
 	}
+	elsif ($arg->[$i] =~/^-esc/i) {
+		$opt{-esc} =1;
+	}
 	elsif (exists($opt{-ctarget})) {
-		$opt{-cline} =[@$arg[$i..$#$arg]]; last;
+		$opt{-cline} =[$opt{-esc} ? $s->qclau(@$arg[$i..$#$arg]) : @$arg[$i..$#$arg]]; 
+		last;
 	}
 	else {
 		$opt{-ctarget} =$arg->[$i];
-		$opt{-cline} =[@$arg[$i+1..$#$arg]]; last;
+		$opt{-cline} =[$opt{-esc} ? $s->qclau(@$arg[$i+1..$#$arg]) : @$arg[$i+1..$#$arg]];
+		last;
 	}
  }}
 
@@ -363,6 +369,35 @@ sub qclat {		# Quote command line arg(s) totally
 		$v =~s/"/\\"/g;				# ??? perl specific
 		$v =~s/\\$/\\\\/;
 		'"' .$v .'"'
+		} @_[1..$#_]
+}
+
+
+sub qclae {		# Escape command line arg(s)
+ 	map {	my $v =defined($_) ? $_ : '';
+		$v =~s/([^a-zA-Z0-9])/uc sprintf('_%02x',ord($1))/eg;
+		$v
+		} @_[1..$#_]
+}
+
+
+sub qclau {	# UnEscape command line arg(s)
+ 	map {	my $v =defined($_) ? $_ : '';
+		$v =~s/_([0-9a-fA-F]{2})/chr hex($1)/ge;
+		$v
+		} @_[1..$#_]
+}
+
+
+sub qclauw {	# UnEscape command line wholly, preserving -options
+	my $k;
+ 	map {	my $v =defined($_) ? $_ : '';
+		$k =0 if $v eq '-esc';
+		$k =1 if ($v !~/^-/) && !$k && defined($k);
+		$v =~s/_([0-9a-fA-F]{2})/chr hex($1)/ge	if $k;
+		$v eq '-esc'
+		? $v # ()
+		: $v
 		} @_[1..$#_]
 }
 
@@ -821,6 +856,7 @@ sub execute {		# Execute command (target action) with current options
     $s->set(@_[1..$#_]);
     $s->{-cid} =$s->{-cerr} =undef;
     $s->checkbase();
+ my $esc =$s->{-esc} ||1; # internal cmd line escaping: 0 - off, 1 - on
  if (!$s->{-cbranch} && !$s->{-cpause}) {
 	$s->echo("Starting:\t"
 		, join(' '
@@ -839,14 +875,14 @@ sub execute {		# Execute command (target action) with current options
 			&& ($s->{-cloop} !~/[vw]/)
 			&& ($^O ne 'MSWin32');
 	$s->echo("StartLoop:\t" .$s->{-cloop} .'; '
-		, join(' ', $s->qclad(@ARGV))) 
+		, join(' ', $esc ? $s->qclauw(@ARGV) : $s->qclad(@ARGV)))
 		if !$s->{-echol} ||($s->{-echol} >1);
 	eval{STDOUT->flush()};
 	sleep($s->{-cloop} =~/(\d+)/ ? $1 || (60*10) : (60*10))
  }
  elsif ($s->{-cbranch}) {
 	$s->echolog("StartBranch:\t" .$s->{-cbranch} .'; '
-		, join(' ', $s->qclad(@ARGV)));
+		, join(' ', $esc ? $s->qclauw(@ARGV) : $s->qclad(@ARGV)));
  }
 
  if ($s->{-reject}) {				# Check reject condition
@@ -929,7 +965,9 @@ sub execute {		# Execute command (target action) with current options
 
  my $cmd  =[@{$s->{-cline}}];			# Tune Command line
 	return($s->error("no command line")) if !$cmd->[0];
-	foreach my $k (qw(lcmd rdo ldo fput fget)) {$s->{-assoc}->{$k}=$s->{-assoc}->{'rcmd'}};
+	foreach my $k (qw(lcmd rdo ldo fput fget mput mget)) {
+		$s->{-assoc}->{$k}=$s->{-assoc}->{'rcmd'}
+	}
 	$ENV{SMDIR} =$s->{-dirb};
 	$ENV{SMLIB} ='';
 	if (($cmd->[0] eq 'rdo') && $s->dsmd(-assoc=>'rdo')) {
@@ -1000,13 +1038,16 @@ sub execute {		# Execute command (target action) with current options
 			,($s->{-vgxf} ? ('-gx' .$s->{-vgxf}) : ())
 			,($s->{-ping} ? ('-g' .$s->{-pingtime}) : ())
 			,($s->{-echo} ? ('-v' .$s->{-echo}) : ())
-			,@{$s->{-cline}});
+			,($esc ? '-esc' : ())
+			);
 		$s->echo("Branching:\t"
-			,join(' ', $s->qclad(@arg))) 
+			,join(' ', $s->qclad(@arg,@{$s->{-cline}}))) 
 			if !$s->{-echol} ||($s->{-echol} >1);
 		(system(1, $s->qclad($^X)
 			, ($0 =~/\.(?:bat|cmd)$/i ? ('-x') : ())
-			, $s->qclad(@arg)) == -1)
+			, $s->qclad(@arg)
+			, $esc ? $s->qclae(@{$s->{-cline}}) : $s->qclad(@{$s->{-cline}})
+			) == -1)
 		&& return($s->error("system(Branching) -> $!"));
 	}
 	$order ='s' if scalar(@brtgt) && !$brcnt;
@@ -1125,9 +1166,11 @@ sub execute {		# Execute command (target action) with current options
 			,$s->qclad($^X)
 			,'-e"use Sys::Manage::CmdEscort; CmdEscort([@ARGV]'
 				.($s->{-cignor} ? ',-i=>1' : '')
-				.(',-v=>' .$s->{-echol} .($s->{-echo} =~/([t])/ ? $1 : '') .'c')
+				.(',-v=>\'' .$s->{-echol} .($s->{-echo} =~/([t])/ ? $1 : '') .'c\'')
+				.($esc ? ',-esc=>1' : '')
 				.')"'
-			,$s->qclat($fn, @$cme)
+			,$s->qclat($fn)
+			,$esc ? $s->qclae(@$cme) : $s->qclat(@$cme)
 			) ==-1)
 		&& return($s->error("system(CmdEscort) -> $!"));
 	}
@@ -1205,8 +1248,9 @@ sub execute {		# Execute command (target action) with current options
 		,($s->{-cignor} ? '-i' : ())
 		,($s->{-ping} ? ('-g' .$s->{-pingtime}) : ())
 		,($s->{-echo} ? ('-v' .$s->{-echo}) : ())
-		,@{$s->{-cline}});
-	$s->echo("Looping:\t", join(' ', $s->qclad(@arg)))
+		,($esc ? '-esc' : ())
+		);
+	$s->echo("Looping:\t", join(' ', $s->qclad(@arg,@{$s->{-cline}})))
 		if !$s->{-echol} ||($s->{-echol} >1);
 	if (($^O eq 'MSWin32') && ($s->{-cloop} !~/v/)) {
 		eval('use Win32::Process');
@@ -1215,7 +1259,9 @@ sub execute {		# Execute command (target action) with current options
 			, join(' '
 				, $s->qclad($^X)
 				, ($0 =~/\.(?:bat|cmd)$/i ? ('-x') : ())
-				, $s->qclat(@arg))
+				, $s->qclat(@arg)
+				, $esc ? $s->qclae(@{$s->{-cline}}) : $s->qclat(@{$s->{-cline}})
+				)
 			, 0
 			, ($s->{-cloop} =~/w/) || 1
 			? &CREATE_NEW_CONSOLE : &CREATE_NEW_PROCESS_GROUP
@@ -1229,7 +1275,9 @@ sub execute {		# Execute command (target action) with current options
 		$SIG{CHLD} ='IGNORE';
 		(system(1, $s->qclad($^X)
 			, ($0 =~/\.(?:bat|cmd)$/i ? ('-x') : ())
-			, $s->qclat(@arg)) ==-1)
+			, $s->qclat(@arg)
+			, $esc ? $s->qclae(@{$s->{-cline}}) : $s->qclat(@{$s->{-cline}})
+			) ==-1)
 		&& return($s->error("system(Looping) -> $!"));
 	}
  }
@@ -1239,7 +1287,7 @@ sub execute {		# Execute command (target action) with current options
 
 sub cmd {		# Execute command (target action) given
  my $s =shift;		# (execute args) -> success
- foreach my $k (qw(-credo -cassign -cloop -cpause -cbranch -ctarget -cxtgt -cuser -cignor -cline)) {
+ foreach my $k (qw(-credo -cassign -cloop -cpause -cbranch -ctarget -cxtgt -cuser -cignor -esc -cline)) {
 	# not reset input:  -ckind -corder
 	# not reset output: -cid   -cerr
 	delete $s->{$k}

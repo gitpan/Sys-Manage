@@ -18,7 +18,7 @@ use strict;
 use Carp;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.54';
+$VERSION = '0.55';
 
 1;
 
@@ -52,6 +52,7 @@ sub initialize {	# Initialize newly created object
 			: '.'}
 	,-dirv		=>''			# directory for vars & logs, below
 	,-logmax	=>1024*1024*2		# log file size
+	,-logpid	=>1			# log pid file switch / name
 	,-prgfn		=>do{$^O eq 'MSWin32'	# program full name
 			? scalar(Win32::GetFullPathName($0)) ||$0
 			: $0}
@@ -115,6 +116,17 @@ sub DESTROY {
 	$s->vfwrite('>crontab.txt',@{$s->{-crontab}});
 	$s->run('crontab',$s->vfname('crontab.txt'));
  }
+
+ if ($s->{-logpid} && (length($s->{-logpid}) >1)) {
+	eval{$s->logrdr(undef)} if $s->{-wrlog};
+	my $t =time();
+	while ((-e $s->{-logpid}) 
+	&& !eval{unlink($s->{-logpid})}) {
+		last if time() -$t >3600;
+		sleep(10)
+	}
+ }
+ $s
 }
 
 
@@ -691,8 +703,22 @@ sub startup {	# Start schedule execution (internal)
 		);
  }
 
- if ($s->{-runmod} =~/^-run/) {			# log file rotator
-	if ($s->{-logmax}
+ if ($s->{-runmod} =~/^-run/) {			# log/pid file rotator
+	my $lf =$s->vfname('log.txt'); $lf =(-e $lf) && $lf;
+	$s->{-logpid} =$s->vfname() .$$ .'-' .$_[0]->{-prgcn}
+		.$s->{-runmod}
+		.(do{	my $a =$s->{-runarg};
+			# $a =~s/([^a-zA-Z0-9_.-])/uc sprintf("%%%02x",ord($1))/eg;
+			$a =~s/\s/_/g;
+			$a =~s/:/-/g;
+			$a =~s/([^a-zA-Z0-9_.-])/-/g;
+			$a
+			})
+		.'.pid'
+		if $s->{-logpid};
+	$s->{-logpid} =link($lf, $s->{-logpid}) && $s->{-logpid}
+			if $lf && $s->{-logpid};
+	if ($s->{-logmax}			# log file rotator
 	&& ($s->{-logmax} <((-s $s->vfname('log.txt'))||0))) {
 		$s->logrdr(undef) if $s->{-wrlog};
 		if ($s->loglck(2,1)) {
@@ -702,6 +728,8 @@ sub startup {	# Start schedule execution (internal)
 	}
 	$s->vfwrite('>>log.txt', "\n". $s->strtime() .' ['.$s->{-prgsn} 
 		."] " .$s->{-runmod} .', ' .$s->{-runarg} .', $$' .$$);
+	$s->{-logpid} =link($s->vfname('log.txt'), $s->{-logpid}) && $s->{-logpid}
+			if !$lf && $s->{-logpid};
  }
 
  if ($s->{-runmod} =~/^-run/) {			# work dir

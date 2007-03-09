@@ -16,7 +16,7 @@ use IO::File;
 use Fcntl qw(:DEFAULT :flock :seek :mode);
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.54';
+$VERSION = '0.55';
 
 1;
 

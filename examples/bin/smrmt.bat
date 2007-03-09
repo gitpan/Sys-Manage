@@ -30,6 +30,8 @@ perl -w -x -S %0 %*
 #		rdo	?-o-e-p		?os-command !	local-script	?args
 #		fget	?-'mp		remote-source	local-target
 #		fput	?-'mp		local-source	remote-target
+#		mget	?-'mr		remote-dir      local-dir       mask    ?seconds
+#		mput	?-'mr		local-dir       remote-dir      mask    ?seconds
 #
 #		where:
 #			-'	quote remote arg with "'"
@@ -37,6 +39,7 @@ perl -w -x -S %0 %*
 #			-e-	refuse STDERR
 #			-p, -z	pack file(s)
 #			-m	move file(s)
+#			-r	recurse subdirectories
 use Sys::Manage::Conn;
 exit !Sys::Manage::Conn->new([@ARGV],-cfg=>1,-exec=>1,-echo=>2,-error=>'die')->connect();
 __END__

@@ -37,16 +37,31 @@ sub initialize {	# Initialize newly created object
 	,-dirw		=>do{$^O eq 'MSWin32'	# directory working
 			? Win32::GetCwd()
 			: eval('use Cwd; Cwd::getcwd')}
+	#-logpid	=>undef			# pid file
 	#-cignor	=>undef		# -i	# command exit code ignoring
 	,-echo		=>2		# -v	# echo verbosity switches
 					# -vct	# ... concurrency, time including
 	,-echol		=>2		# -v#	# ... verbosity level
+	#-esc		=>undef		# -esc	# cmd line escaped
 	,-clog		=>''		# ...	# command log name
 	,-cline		=>[]		# ...	# command line
 	, %$s
 	);
  $s->set(@_);
  $s
+}
+
+sub DESTROY {
+ my $s =$_[0];
+ if ($s->{-logpid}) {
+	my $t =time();
+	while ((-e $s->{-logpid}) 
+	&& !eval{unlink($s->{-logpid})}) {
+		last if time() -$t >60;
+		sleep(10)
+	}
+	$s->{-logpid}=undef
+ }
 }
 
 
@@ -63,7 +78,7 @@ sub set {               # Get/set slots of object
  return($_[0]->{$_[1]})	if (@_ <3) && !ref($_[1]);
  my($s, $arg, %opt) =ref($_[1]) ? @_ : ($_[0],undef,@_[1..$#_]);
  foreach my $k (keys(%opt)) {
-	next if $k !~/^-(?:\w|vt|vc)$/;
+	next if $k !~/^-(?:\w|vt|vc|esc)$/;
 	my($n, $v) =($k, $opt{$k});
 	$n =	  $n eq '-i'	? '-cignor'
 		: $n eq '-v'	? '-echo'
@@ -83,9 +98,13 @@ sub set {               # Get/set slots of object
 		$opt{-echo} =$v	if !(exists $opt{-echo});
 		$opt{-echol}=$v =~/(\d+)/ ? $1 : 2;
 	}
+	elsif ($arg->[$i] =~/^-esc/i) {
+		$opt{-esc} =1;
+	}
 	else {
 		$opt{-clog}  =$arg->[$i];
-		$opt{-cline} =[@$arg[$i+1..$#$arg]]; last;
+		$opt{-cline} =[$opt{-esc} ? $s->qclau(@$arg[$i+1..$#$arg]) : @$arg[$i+1..$#$arg]];
+		last;
 	}
  }}
  $opt{-echol} =$opt{-echo} =~/(\d+)/ ? $1 : 2
@@ -129,6 +148,21 @@ sub qclat {		# Quote command line arg(s) total
 		} @_[1..$#_]
 }
 
+
+sub qclae {		# Escape command line arg(s)
+ 	map {	my $v =defined($_) ? $_ : '';
+		$v =~s/([^a-zA-Z0-9])/uc sprintf('_%02x',ord($1))/eg;
+		$v
+		} @_[1..$#_]
+}
+
+
+sub qclau {	# UnEscape command line arg(s)
+ 	map {	my $v =defined($_) ? $_ : '';
+		$v =~s/_([0-9a-fA-F]{2})/chr hex($1)/ge;
+		$v
+		} @_[1..$#_]
+}
 
 
 sub copen3 {		# Command output open
@@ -177,6 +211,11 @@ sub execute {		# Execute command (target action)
     $fl =$s->{-clog} .'-run.txt';
  my $fh =IO::File->new($fl,'w')
 	|| croak("\$\$$p Error: creating '$fl': $!");
+ $s->{-logpid} =$s->{-clog} =~/([^\\\/]+)([\\\/])([^\\\/]+)[\\\/]([^\\\/]+)$/ 
+	? $` .$2 .'var' .$2 .$$ .'-' .$1 .'-' .$3 .'-' .$4 .'.pid'
+	: undef;
+ eval{$s->{-logpid} =link($fl, $s->{-logpid}) && $s->{-logpid}; $! =$^E=0} 
+	if $s->{-logpid};
  $fh->print($s->strtime()," \$\$$p "
 	,join(' ', $s->qclad(@{$s->{-cline}})),"\n");
  $fh->flush();
@@ -224,6 +263,8 @@ sub execute {		# Execute command (target action)
 	fileno(OLDOUT) && open(STDOUT, '>&OLDOUT'); fileno(OLDOUT) && close(OLDOUT);
 	fileno(OLDERR) && open(STDERR, '>&OLDERR'); fileno(OLDERR) && close(OLDERR);
 	$fh->close();
+	eval{$s->{-logpid} =!(-e $s->{-logpid}) || unlink($s->{-logpid}) ? undef : $s->{-logpid}
+		} if $s->{-logpid};
 	($?,$!,$^E,$@) =@e;
 	print( 	 ($s->{-echo} =~/t/ ? ($s->strtime(), ' ') : ())
 		,"\$\$$p "
@@ -249,11 +290,15 @@ sub execute {		# Execute command (target action)
 			? ($^X
 				,'-e'
 				,do{my	$v =$cl->[1]; $v=~s/"/\\"/g;
-					$v =$v=~/^([\w\d:]+)->/
-					? "use $1;$v"
-					: $v;
+					$v =	$v=~/^([\w\d:]+)->/
+						? "use $1;$v"
+						: $v;
 					'"exit !do{' .$v .'}"'}
-				,$s->qclad(@$cl[2..$#$cl]))
+				,'--'
+				,$cl ->[1] =~/\b-esc=>1\b/
+				? $s->qclae(@$cl[2..$#$cl])
+				: $s->qclad(@$cl[2..$#$cl])
+				)
 			: $s->qclad(@$cl)))) {
 	($!,$^E) =(0,0);
 	my $r;
@@ -285,6 +330,8 @@ sub execute {		# Execute command (target action)
 		  : '')
 		, ($?>>8 ? " $!" .($! && $^E ? " ($^E)" : '') : ''), "\n");
 	$fh->close();
+	eval{$s->{-logpid} =!(-e $s->{-logpid}) || unlink($s->{-logpid}) ? undef : $s->{-logpid}
+		} if $s->{-logpid};
 	eval{STDOUT->flush(); STDERR->flush()};
 	($?,$!,$^E,$@) =@e;
 	rename(	  $s->{-clog} .'-run.txt'
@@ -301,6 +348,8 @@ sub execute {		# Execute command (target action)
 	($?,$!,$^E,$@) =@e;
 	eval{$fh->print($s->strtime(), " \$\$$p Exit: 255 [IPC] $! $@\n")};
 	eval{$fh->close()};
+	eval{$s->{-logpid} =!(-e $s->{-logpid}) || unlink($s->{-logpid}) ? undef : $s->{-logpid}
+		} if $s->{-logpid};
 	eval{STDOUT->flush(); STDERR->flush()};
 	rename(($s->{-clog} .'-run.txt'), ($s->{-clog} .'-err.txt'))
 		|| carp("\$\$$p rename: (" .($s->{-clog} .'-run.txt')

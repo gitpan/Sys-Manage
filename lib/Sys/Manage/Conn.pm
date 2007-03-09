@@ -21,7 +21,7 @@ use IO::Select;
 use Safe;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.54';
+$VERSION = '0.55';
 
 my $qlcl =0;	# quoting local args not needed because of shell quoting
 
@@ -61,11 +61,14 @@ sub initialize {	# Initialize newly created object
 			: $0}
 	,-time		=>time()		# obj run time
 	,-argv		=>[]			# script args (after parse)
+	#-esc		=>undef		# -esc	# escaped command line
 	#-exec		=>undef		# -e	# execute '-argv'
 	,-debug		=>0		# -d	# debug prompt
 	,-echo		=>0		# -v	# echo level: 1+cmd, 2+out, 3+in
 	,-progress	=>1			# echo progress indicator
 	,-error		=>'die'			# error proc: 'die','warn',false
+	#,-reject	=>undef			# reject command condition sub{}
+	#,-rejected	=>undef			# reject result
 	,-pack		=>'zip'			# archiver to pack
 	#-packx		=>undef			# archiver to unpack
 	,-node		=>($^O eq 'MSWin32'	# agent node
@@ -86,6 +89,9 @@ sub initialize {	# Initialize newly created object
 				)]->[4]))}
 	,-perl		=>'perl'		# agent perl path
 	#-wmi		=>undef			# WMI connection
+	#-wmisil	=>undef			# WMI security impersonation level
+	#-wmisoon	=>undef			# WMI option: at timeout / scheduler impersonation
+	#-wmisis	=>undef			# WMI option: service impersonation
 	#-wmiph		=>undef			# WMI Win32_Process
 	#-wmipid	=>undef			# WMI process id
 	#-asrc		=>[]			# agent perl source (see below)
@@ -157,6 +163,7 @@ sub set {               # Get/set slots of object
  if (exists($opt{-d}))		{$opt{-debug}=$opt{-d};	delete $opt{-d}}
  if (exists($opt{-e}))		{$opt{-exec} =$opt{-e};	delete $opt{-e}}
  if ($arg) {
+	@$arg =$s->qclau(@$arg) if $opt{-esc};
 	$s->{-argv} =$arg;
 	if ($arg->[0] && ($arg->[0]=~/^-(?:\w[\w\d]*)*$/)) {
 		my $o =shift @$arg;
@@ -227,6 +234,22 @@ sub qclat {		# Quote command line arg(s) totally
 }
 
 
+sub qclae {		# Escape command line arg(s)
+ 	map {	my $v =defined($_) ? $_ : '';
+		$v =~s/([^a-zA-Z0-9])/uc sprintf('_%02x',ord($1))/eg;
+		$v
+		} @_[1..$#_]
+}
+
+
+sub qclau {	# UnEscape command line arg(s)
+ 	map {	my $v =defined($_) ? $_ : '';
+		$v =~s/_([0-9a-fA-F]{2})/chr hex($1)/ge;
+		$v
+		} @_[1..$#_]
+}
+
+
 sub error {		# Error final
  my $s =$_[0];		# (strings) -> undef
  $@ =join(' ',map {defined($_) ? $_ : 'undef'} @_[1..$#_]);
@@ -240,6 +263,7 @@ sub error {		# Error final
  : return(undef);
  return(undef);
 }
+
 
 
 sub echo {		# Echo printout
@@ -261,6 +285,22 @@ sub oleerr {		# OLE error message
 	.' ' 
 	.(Win32::OLE->LastError() && Win32::FormatMessage(Win32::OLE->LastError()) ||'undef');
 }
+
+
+sub reject {		# Reject condition
+ if ($_[0]->{-reject}) {
+	$_[0]->{-rejected} =eval{&{$_[0]->{-reject}}(@_)||''};
+	$_[0]->{-rejected} =$@ if !defined($_[0]->{-rejected});
+	$_[0]->{-rejected}
+ }
+ else	{undef}
+}
+
+
+sub errject {		# Reject error final
+ $_[0]->error("reject '" . $_[0]->{-rejected} ."'")
+}
+
 
 
 sub wmi {		# WMI connection
@@ -319,6 +359,10 @@ sub disconnect {	# Disconnect agent
 
 sub agtsrc {		# Agent source
  my($s,$f) =@_;		# (?separate file)
+			# '0' - embedded '-e' agent
+			# 's' - service without loop
+			# 'l' - loop file simplest
+			# 'f' - loop file comlex
  #use IO::Socket; my($m_,$r_); $r_=IO::Socket::INET->new(LocalPort=>8081,Listen=>1); $m_=$r_->accept(); $r_->close; open(STDERR, '>&STDOUT'); open(STDOUT, '>&' .$m_->fileno); eval $m_->getline if $m_->peerhost() eq '127.0.0.1'
  #use IO::Socket; my($m_,$r_); $r_=IO::Socket::INET->new(LocalPort=>8081,Listen=>1); $m_=$r_->accept(); $r_->close; if($m_->peerhost eq '127.0.0.1'){my $r_; while(defined($r_=$m_->getline)){$m_->printflush($r_)}}
  my $r ='use IO::Socket;'
@@ -328,6 +372,7 @@ sub agtsrc {		# Agent source
  .($s->{-timeout} ? ',Timeout=>' .$s->{-timeout} : '')
  .',Reuse=>1,Listen=>1);'
  .(!$f		?('$m_=$r_->accept();$r_->close;')
+  : $f eq 's'	?("\n\$m_=\$r_->accept();\$r_->close;\$r_=undef;\n")
   : $f eq 'l'	?("\n\$m_=\$r_->accept();\$r_->close;\$r_=undef;\$p_=system(1,\$^X,\$0);\n")
     		:("\nwhile(\$m_=\$r_->accept()){\$SIG{CHLD}='IGNORE';\n"
 		 .'if($^O eq "MSWin32"){eval("use Win32::Process");$r_->close();$r_=undef;' ."\n"
@@ -353,6 +398,7 @@ sub agtsrc {		# Agent source
 	$v}
  .'$?\\t$!\\t$^E\\t$@\\t$r_\\n")'
  .(!$f		? '}'
+  : $f eq 's'	? '}'
   : $f eq 'l'	? '}'
 		: "\n}\$m_->close}");
  $r =~s/(["])/\\$1/g if !$f;
@@ -398,7 +444,7 @@ sub connect {		# Connect agent node
  $s->disconnect() if $s->{-agent};
  my $cts =time();
  my $agt =$s->{-asrc} && $s->{-asrc}->[0]
-	|| ($s->{-perl} .' -e "' .$s->agtsrc(0) .'"');
+	|| ($s->{-perl} .' -e"' .$s->agtsrc(0) .'"');
  my $ctp =join(' '
 		,''
 		,$s->{-node} .':' .$s->{-port}
@@ -411,39 +457,160 @@ sub connect {		# Connect agent node
 	$s->echo("\n",'connect','wmi',$ctp) if $s->{-echo};
 	local $^W = undef;
 	eval('use Win32::OLE');
+	my $wmisil =$s->{-wmisil}; # [4,3] may be used
+		# 4 - delegate, 3 - impersonate, 2 - identify, 1 - anonymous
+		# 4 - Allows objects to permit other objects to use the credentials of the caller.
+		#	Windows 2000 and later. See also [MSDN: Connecting to a 3rd Computer-Delegation]
+		#	The account of Agent computer must be marked as 'Trusted for delegation'...
+		# 3 - Allows objects to use the credentials of the caller.
+		#	Recommended for Scripting API for WMI calls.
 	if (!$s->{-pswd}) {
+		$wmisil =3 if !defined($wmisil);
 		$s->{-wmi} =Win32::OLE->GetObject(
-				'winmgmts:{impersonationLevel=impersonate}!//'
-					# impersonate, delegate
-				.$s->{-node} .'/root/cimv2')
+			'winmgmts:{impersonationLevel=impersonate}!//'
+			.$s->{-node} .'/root/cimv2')
 			|| return($s->error('WMI->GetObject:',$s->oleerr()))
 	}
 	else {
+		$wmisil =[4,3] if !defined($wmisil);
 		$s->{-wmi} =Win32::OLE->new('WbemScripting.SWbemLocator')
 			|| return($s->error('WMI->new:',$s->oleerr()));
-		$s->{-wmi}->{Security_}->{ImpersonationLevel}=4;
-			# 4-delegate, 3-impersonate
-			# if {ImpersonationLevel}=4 fails, so without windows network access
+		$s->{-wmi}->{Security_}->{ImpersonationLevel}=ref($wmisil) ? $wmisil->[0] : $wmisil;
 		$s->{-wmi} =$s->{-wmi}->ConnectServer($s->{-node}
 					,'root\\cimv2'
 					,$s->{-user}
 					,$s->{-pswd})
-			|| return($s->error('WMI->ConnectServer:',$s->oleerr()));
-		$s->{-wmi}->{Security_}->{ImpersonationLevel}=4; 
+			|| return($s->error('WMI->ConnectServer:',$s->oleerr()))
 	}
-	$s->echo('connect',"wmi Win32_Process...\n")
-			if $s->{-echo} >2;
-	$s->{-wmiph} =$s->{-wmi}->Get('Win32_Process')
-			|| return($s->error('WMI->Win32_Process:',$s->oleerr()));
+	foreach my $lvl (ref($wmisil) ? @$wmisil : $wmisil) {
+		# if '4' fails, so '3' without windows network access
+		$s->{-wmi}->{Security_}->{ImpersonationLevel}=$lvl
+			if $lvl;
+		$s->echo('connect',"wmi Win32_Process...\n")
+				if $s->{-echo} >2;
+		$s->{-wmiph} =$s->{-wmi}->Get('Win32_Process');
+		last if $s->{-wmiph};
+		my $err =$s->oleerr(); $err=~s/[\r\n]+/ /g; $err =~s/\s+/ /g;
+		if ($lvl
+		&& ($lvl==4)
+		&& (Win32::OLE->LastError() ==Win32::OLE::HRESULT(0x80070721))
+		&& ref($wmisil)
+		&& grep /^3$/, @$wmisil) {
+			$s->echo('connect','wmi ImpersonationLevel ',$lvl-1, "\n");
+			next
+		}
+		return($s->error('WMI->Win32_Process:', $err));
+	}
+	if ($s->{-wmisis}) {
+		my $rn ='Sys-Manage' .($s->{-chkip} ? '-' .$s->{-chkip} : '') .'.pl';
+		my $rs =$s->{-wmi}->Get("Win32_Service='$rn'");
+		return($s->error('connect',"WMI->Win32_Service->Get('$rn')",$s->oleerr()))
+			if  !$rs
+			&&  Win32::OLE->LastError()
+			&& (Win32::OLE->LastError() !=Win32::OLE::HRESULT(0x8004103A))
+			&& (Win32::OLE->LastError() !=Win32::OLE::HRESULT(0x80041010))
+			&& (Win32::OLE->LastError() !=Win32::OLE::HRESULT(0x80041002));
+		if (!$rs 
+		&& Win32::OLE->LastError()
+		&& (Win32::OLE->LastError()==Win32::OLE::HRESULT(0x80041002))) {
+			$s->echo('connect',"WMI->Win32_Service->Install('$rn')\n")
+				if $s->{-echo};
+			my $rv;
+			{
+				local $s->{-exec}	=undef;
+				local $s->{-wmisis}	=undef;
+				local $s->{-wmisoon}	=undef;
+				local $s->{''}		=undef;
+				local($s->{-wmi},$s->{-wmiph},$s->{-wmipid})
+					=(undef,undef,undef);
+				local $s->{-agent}	=undef;
+				local $s->{-select}	=undef;
+				local $s->{-asaw}	=undef;
+				if (!$rv) {
+					foreach my $e (split /;/, $ENV{PATH}) {
+						next	if !$e 
+							|| !-e "$e\\instsrv.exe";
+						$rv =$e; last
+					}
+					return($s->error('WMI->Service:','instsrv.exe / srvany.exe not found'))
+						if !$rv;
+				}
+				if ($rv
+				&& !$s->reval('(-e "$ENV{SystemRoot}\\\\System32\\\\instsrv.exe") && (-e "$ENV{SystemRoot}\\\\System32\\\\srvany.exe")')
+					) {
+					foreach my $f ('instsrv.exe','srvany.exe') {
+						eval{$s->fput('-"',"$rv\\$f"
+							,"\$ENV{SystemRoot}\\System32\\$f")}
+					}
+				}
+				$rv =$s->fput('-"s'
+					, $s->{-asrc} && $s->{-asrc}->[0] || $s->agtsrc('s')
+					,"\$ENV{SystemRoot}\\System32\\$rn")
+					|| return($s->error("fput($rn):",$@));
+				$rv =$s->reval(
+					"system('instsrv','$rn',\"\$ENV{SystemRoot}\\\\System32\\\\srvany.exe\");"
+					."print \"Editing Registry for '$rn'\\n\";"
+					.'use Win32::TieRegistry;'
+					."my \$r=\$Registry->{'LMachine\\\\System\\\\CurrentControlSet\\\\Services\\\\$rn'};"
+					."die(\"Service Registry inavailable\") if !\$r;"
+					.'$r->SetValue("Start","0x0003","REG_DWORD");'
+					.'$r->SetValue("Type", "0x0110","REG_DWORD");'
+					.'$r->CreateKey("Parameters");'
+					."\$r->{'Parameters'}={'Application'=>\"\$ENV{SystemRoot}\\\\System32\\\\cmd.exe\",'AppParameters'=>\"/c start perl \$ENV{SystemRoot}\\\\System32\\\\$rn & net stop $rn\"};"
+					.'print "Editing Registry Done\\n";'
+					.'; 1'
+					);
+				$s->disconnect();
+			}
+			$rs =$s->{-wmi}->Get("Win32_Service='$rn'");
+			if (!$rv) {
+				$rv =$rs->Delete() if $rs;
+				$rv && return($s->error('WMI->Win32_Service->Delete:',$rv));
+				$rs =undef;
+				return($s->error('WMI->Win32_Service->Create:','rollback'));
+			}
+			else {
+				$rs->Change(undef,undef,256,undef,'Manual',1);
+			}
+		}
+		if (!$rs) {
+		}
+		elsif (1) {
+			$s->echo('connect',"wmi Win32_Service->Start($rn)...\n")
+				if $s->{-echo} >2;
+			$rs->StopService() if $rs->{State} ne 'Stopped';
+			my $rv =$rs->StartService();
+			   $rv	&& return($s->error("WMI->Win32_Service->Start($rn): $rv ",$s->oleerr()));
+			$agt ='';
+		}
+		else {
+			$agt ="net stop $rn & net start $rn";
+		}
+	}
+	elsif ($s->{-wmisoon}) {
+		$agt =$s->{-perl} ." -e\"system('at',join(':',(localtime(time+" 
+			.$s->{-wmisoon}
+			."))[2,1]),'/interactive',\@ARGV)\" -- $agt";
+		# !!! unimplemented !!! 259 chars limit
+	}
 	$s->echo('connect',"wmi Win32_Process->Create("
 			, $agt
 			, ') (', length($agt), ' bytes)'
-			, "...\n") if $s->{-echo} >2;
+			, "...\n") if $agt && ($s->{-echo} >2);
 	my $pid =undef;
-	my $ret =$s->{-wmiph}->Create($agt,undef,undef,$pid);
+	my $ret =$agt && $s->{-wmiph}->Create($agt,undef,undef,$pid);
 		$ret	&& return($s->error('WMI->Win32_Process->Create:',$s->oleerr(),$ret));
 		# !!! may be Win32_Process.Create==1 ???
-	$s->{-wmipid} =$pid;
+	if ($s->{-wmisis}) {
+		$s->{-wmipid} =undef;
+	}
+	elsif ($s->{-wmisoon}) {
+		$s->{-wmipid} =undef;
+		sleep($s->{-wmisoon})
+	}
+	else {
+		$s->{-wmipid} =$pid;
+	}
  }
  elsif ($s->{-init} eq 'rsh') {	# using remote shell
 	$s->echo("\n",'connect','rsh',$ctp) if $s->{-echo};
@@ -503,7 +670,7 @@ sub connect {		# Connect agent node
  if ($s->{-exec}) {
 	if (!$s->{-argv} || !@{$s->{-argv}}) {
 	}
-	elsif ($s->{-argv}->[0] =~/^(rcmd|reval|fput|rfput|fget|rfget|rdo)/) {
+	elsif ($s->{-argv}->[0] =~/^(rcmd|reval|fput|rfput|mput|fget|rfget|mget|rdo)/) {
 		return($s->$1(@{$s->{-argv}}[1..$#{$s->{-argv}}]))
 	}
 	else {
@@ -637,6 +804,7 @@ sub reval {	# Remote Eval perl code
  my $f =ref($_[$#_]) eq 'CODE' ? pop : undef;
  $s->connect if !$s->{''};
  $s->echo('reval','{...}', "\n") if $s->{-echo};
+ $s->reject($s,'reval',$o,@_) && return($s->errject());
  local $s->{-rxpnd0} ='do{';
  local $s->{-rxpnd1} =$o;
  $s->reval0($s->rxpnd0(@_))
@@ -652,6 +820,7 @@ sub rcmd {	# Remote Run OS command
  $s->connect if !$s->{''};
  $s->echo('rcmd', join(' ', map{defined($_) ? (qclad($s,$_)) : ('undef')} $o, @_), "\n") 
 	if $s->{-echo};
+ $s->reject($s,'rcmd',$o,@_) && return($s->errject());
  local $s->{-rxpnd0} ='system{';
  local $s->{-rxpnd1} =$o;
  $s->reval0($s->rxpnd0(@_))
@@ -674,6 +843,7 @@ sub lcmd {	# Local OS command
 		: ('undef')
 		} $o, @_), "\n")
 	if $s->{-echo};
+ $s->reject($s,'lcmd',$o,@_) && return($s->errject());
  if ($f) {
 	$!=$^E=0;
 	my $hi;
@@ -729,9 +899,14 @@ sub rxpnd0 {	# Expand list to evaluation string (base layer)
  .'$?=$!=$^E=0;my $r_='
  .($s->{-rxpnd0} =~/^system/
 	? $s->rxpnd(@_)
-	: ('Data::Dumper::Dumper(' .$s->rxpnd(@_) .')')
+	: ($s->rxpnd(@_) .'; $r_=Data::Dumper::Dumper($r_)')
+		# : ('Data::Dumper::Dumper(' .$s->rxpnd(@_) .')')
 	)
  .';'
+ .'$^E=0 if !$!;'
+ .'if($^E && ($^E =~/[\\n\\r\\t]/)) {$@=$^E .($@ ? ". $@" : ""); $^E=0};'
+ .'if($! && ($! =~/[\\n\\r\\t]/)) {$@=$! .($@ ? ". $@" : ""); $!=0};'
+ .'$@ =~s/[\\n\\r\\t]/ /g if $@;'
  .'{my @t=($!,$^E);select(STDERR);$|=1;select(STDOUT);$|=1;($!,$^E)=@t};'
  .'$r_;'
 }
@@ -809,6 +984,8 @@ sub rxpnd {	# Expand list to evaluation string (subsequent layer)
 sub fget {	# Get remote file
  my $s =shift;	# (?"-'m+b-s+z+", remote file, local file, postfix) -> success
  my $o =$_[0] =~/^-(?:['"\w]['"\w\d+-]*)*$/ ? shift : '-';
+ my $oq =$o=~/'/ ? "'" : '"';
+ my $op =1024*16;
  my ($fa, $fm, @ps) =@_;
  $s->connect if !$s->{''};
  if ($qlcl && ($o !~/'/) && ($o !~/s(?![0-])/)) {
@@ -821,8 +998,7 @@ sub fget {	# Get remote file
  $s->echo('fget', qclad($s,$o), ' ', qclad($s,$fa), ' '
 	,(($o =~/s(?![0-])/) || !defined($fm) ? '[string]' : (qclad($s,$fm)))
 	,"\n")	if $s->{-echo};
- my $oq =$o=~/'/ ? "'" : '"';
- my $op =1024*16;
+ $s->reject($s,'fget',$o,@_) && return($s->errject());
  local $s->{-rxpnd0} ='do{';
  local $s->{-rxpnd1} =$o;
  if (($o =~/s(?![0-])/) || !defined($fm)) {
@@ -928,6 +1104,8 @@ sub fget {	# Get remote file
 sub fput {	# Put remote file
  my $s =shift;	# (?"-'m+b-s+z+", local file, remote file, ?postfix, ?filter) -> success
  my $o =$_[0] =~/^-(?:['"\w]['"\w\d+-]*)*$/ ? shift : '-';
+ my $oq =$o=~/'/ ? "'" : '"';
+ my $op =1024*16;
  my ($fm,$fa,@ps) =@_;
  my $fe =scalar(@ps) && (ref($ps[$#ps]) eq 'CODE') ? pop @ps : undef;
  $s->connect if !$s->{''};
@@ -940,8 +1118,7 @@ sub fput {	# Put remote file
  $s->echo('fput', qclad($s,$o), ' '
 		,($o =~/s(?![0-])/ ? '[string]' : (qclad($s,$fm)))
 		,' ', qclad($s,$fa), "\n") if $s->{-echo};
- my $oq =$o=~/'/ ? "'" : '"';
- my $op =1024*16;
+ $s->reject($s,'fput',$o,@_) && return($s->errject());
  local $s->{-rxpnd0} ='do{';
  local $s->{-rxpnd1} =$o;
  my($m_,$fz,$fu,$ze,$fh,$fs);
@@ -1070,6 +1247,7 @@ sub rfwrite {	# Write remote file
  my $o =$_[0] =~/^-(?:['"\w]['"\w\d+-]*)*$/ ? shift : '-';
     $o =~s/s[\d+-]//g;
     $o .='s+';
+ $s->reject($s,'rfwrite',$o,@_) && return($s->errject());
  $s->fput($o,$_[$#_],@_ >2 ? join("\n", @_[0..$#_-1]) : $_[0]);
 }
 
@@ -1079,6 +1257,7 @@ sub lfwrite {	# Write local file
  my $o =$_[0] =~/^-(?:['"\w]['"\w\d+-]*)*$/ ? shift : '-';
  my $f =$_[0]; $f ='>' .$f if $f !~/^[<>]/;
  $s->echo('lfwrite', qclad($s,$o), ' ', qclad($s,$f),"\n") if $s->{-echo};
+ $s->reject($s,'lfwrite',$o,@_) && return($s->errject());
  local *FILE;  open(FILE, $f) || return($s->error("lfwrite: cannot open '$f': $!"));
  my $r =undef;
  if ($o !~/b[0-]/) {
@@ -1098,6 +1277,7 @@ sub rfread {	# Read remote file
  my $o =$_[0] =~/^-(?:['"\w]['"\w\d+-]*)*$/ ? shift : '-';
     $o =~s/s[\d+-]//g;
     $o .='s+';
+ $s->reject($s,'rfread',$o,@_) && return($s->errject());
  $s->fget($o,$_[0]);
 }
 
@@ -1110,6 +1290,7 @@ sub lfread {	# Read local file
 	if ($f =~/^[<>]+/)	{$f0 =$'}
 	else			{$f  ='<' .$f}
  $s->echo('lfread', qclad($s,$o), ' ', qclad($s,$f),"\n") if $s->{-echo};
+ $s->reject($s,'lfread',$o,@_) && return($s->errject());
  local *FILE;  open(FILE, $f) || return($s->error("lfread: cannot open '$f': $!"));
  my $b =undef;
  binmode(FILE) if $o !~/b[0-]/;
@@ -1258,6 +1439,7 @@ sub rdo {	# Remote do
 			, map {	defined($_) ? (qclad($s,$_)) : ('undef')
 				} $o, (@c ? (@c,$m) : @c), $f, @a)
 		,"\n") if $s->{-echo};
+ $s->reject($s,'rdo',$o,@_) && return($s->errject());
  $s->fput($o, $p, $g
 	, 'do{'
 	,($o =~/[pz](?![0-])/
@@ -1288,4 +1470,228 @@ sub rdo {	# Remote do
 	,'$rv'
 	,($b ? $b : ())
 	);
+}
+
+
+sub rls {	# Remote ls
+ my $s =shift;	# (?"-'o-e-", 'path' or 'sub{}', ? 'filter' or 'sub{}', 
+		# ? 'filler sub{}', ? container[]{}'') -> list || success
+ my $o =$_[0] =~/^-(?:['"\w]['"\w\d+-]*)*$/ ? shift : '-';
+ my $oq=$o=~/'/ ? "'" : '"';
+ my($p, $f, $e, $c) =@_;
+ my @r;
+
+ $s->connect if !$s->{''};
+ $s->echo('rls', join(' ', (map {defined($_) ? $s->qclad($_) : ()} $p, $f)), "\n") if $s->{-echo};
+ $s->reject($s,'rls',$o,@_) && return($s->errject());
+ local $s->{-rxpnd0} ='do{';
+ local $s->{-rxpnd1} =$o;
+
+ $s->reval0($s->rxpnd0($o
+	,'my $p='
+		.($p =~/^sub\s*\{/
+		 ? 'do{my $v=' .$p .'; &$v()}'
+		 : $p =~/^(?:eval|do)\s*\{/
+		 ? "($p)"
+		 : (do{my $v =$p;
+			$v =~s/\\/\\\\/g;
+			$v =~s/\Q$oq\E/\\$oq/g;
+			"$oq$v$oq"
+			})) .'; '
+	.'my $f=' .(!$f
+		? 'undef' 
+		: $f=~/^sub\s*\{/ 
+		? $f
+		: $f=~/^(?:eval|do)\s*\{/ 
+		? "sub{$f}"
+		: (do{	$f=~s/\*\.\*/*/g;
+			$f=~s:(\(\)[].+^\-\${}[|]):\\$1:g;
+			$f=~s/\*/.*/g;
+			$f=~s/\?/.{1,1}/g;
+			"sub{\$_[1]=~/$f/i}"
+			})) .';'
+	.'my $e=' .(!$e
+		? 'undef'
+		: $e=~/^sub\s*\{/ 
+		? $e
+		: "sub{$e}"
+			) .';'
+	.'my $ns=($p=~/([\\\\\/])/ ? $1 : $^O eq "MSWin32" ? "\\\\" : "/");'
+	.'local *DIR;local $_;'
+	.'if (opendir(DIR,$p)) {my $n;'
+	.'while(defined($_=$n=readdir(DIR))){'
+	.'next if ($n eq ".") || ($n eq "..");'
+	.'next if $f && '
+		.($o =~/r(?![0-])/ ? '(!-d ($p .$ns .$n)) && ' : '')
+		.'!&$f($p,$_=$n,$p .$ns .$n);'
+	.'$m_->print($e ? join("\t", $n, (map {defined($_) ? $_ : ""} &$e($p,$n,$_ =$p .$ns .$n))) : $n,"\n");'
+	.'} closedir(DIR); $r_=1} else {$r_=undef}'
+	))
+ && $s->getret(
+	sub {	if (!defined($c)) {
+			push @r, $_ =~/\t/ ? [split /\t/, $_] : $_
+		}
+		elsif (!ref($c)) {
+			$c .=$_ ."\n"
+		}
+		elsif (ref($c) eq 'HASH') {
+			if ($_ =~/\t/) {
+				$c->{$`} =do{my $v =$';
+						$v =~/\t/ 
+						? [split /\t/, $v]
+						: $v}
+			}
+			else {
+				$c->{$_} =undef
+			}
+		}
+		elsif (ref($c) eq 'ARRAY') {
+			push @$c, $_ =~/\t/ ? [split /\t/, $_] : $_
+		}; 1});
+ !$c ? @r : !$s->{-reteval} ? undef : $c
+}
+
+
+sub lls {	# Local ls
+ my $s =shift;	# (?"-'o-e-", 'path' or 'sub{}', ? 'filter' or 'sub{}', 
+		# ? 'filler sub{}', ? container[]{}'') -> list || success
+ my $o =$_[0] =~/^-(?:['"\w]['"\w\d+-]*)*$/ ? shift : '-';
+ my $oq=$o=~/'/ ? "'" : '"';
+ $s->reject($s,'lls',$o,@_) && return($s->errject());
+ my($p, $f, $e, $c) =@_;
+ my @r;
+ if	($p =~/^sub\s*\{/)		{$p =eval('do{my $v=' .$p .'; &$v()}')}
+ elsif	($p =~/^(?:eval|do)\s*\{/)	{$p =eval($p)}
+ elsif	(ref($p))			{$p =&$p()}
+ if ($e && !ref($e)) {
+	$e =eval("sub{$e}")
+ }
+ if ($f && !ref($f)) {
+	if	($f=~/^sub\s*\{/) {
+		$f =eval($f)
+	}
+	elsif	($f=~/^(?:eval|do)\s*\{/) {
+		$f =eval("sub{$f}")
+	}
+	else {
+		$f=~s/\*\.\*/*/g;
+		$f=~s:(\(\)[].+^\-\${}[|]):\\$1:g;
+		$f=~s/\*/.*/g;
+		$f=~s/\?/.{1,1}/g;
+		$f=eval("sub{\$_[1]=~/$f/i}")
+	}
+ }
+ my $ns=($p=~/([\\\/])/ ? $1 : $^O eq "MSWin32" ? "\\" : "/");
+ local *DIR;
+ local $_;
+ if (opendir(DIR,$p)) {
+	my $n;
+	while(defined($_=$n=readdir(DIR))){
+		next if ($n eq ".") || ($n eq "..");
+		next if $f  
+			&& ($o =~/r(?![0-])/ ? (!-d ($p .$ns .$n)) : 1)
+			&& !&$f($p, $_=$n, $p .$ns .$n);
+		if (!defined($c)) {
+			push @r, $e ? [$n, &$e($p, $n, $_=$p .$ns .$n)] : $n
+		}
+		elsif (!ref($c)) {
+			$c .=join("\t", $e ? ($n, &$e($p, $n, $_=$p .$ns .$n)) : $n) ."\n"
+		}
+		elsif (ref($c) eq 'HASH') {
+			if ($e) {
+				@r =&$e($p, $n, $_=$p .$ns .$n);
+				$c->{$n} =scalar(@r) >1	? [@r] : $r[0]
+			}
+			else {
+				$c->{$n} =undef
+			}
+		}
+		elsif (ref($c) eq 'ARRAY') {
+			push @$c, $e ? [$n, &$e($p, $n, $_=$p .$ns .$n)] : $n
+		}
+	} 
+	closedir(DIR);
+	return(defined($c) ? $c : @r)
+ }
+ else {
+	return(@r)
+ }
+}
+
+
+sub mfpg {	# Put/Get newer multiple files
+ my $s =shift;	# (method, ?"-'m+r+", 'source', 'target', 'filter', seconds lim) -> success
+ my $m =shift;
+ my $o =$_[0] =~/^-(?:['"\w]['"\w\d+-]*)*$/ ? shift : '-';
+ my($sp, $tp, $fe, $sm) =@_;
+ $s->echo($m, join(' ', (map {defined($_) ? $s->qclad($_) : ()} $sp, $tp, $fe, $sm)), "\n") if $s->{-echo};
+ $s->reject($s,$m,$o,@_) && return($s->errject());
+ my $s0=time();
+ my $oq=$o=~/'/ ? "'" : '"';
+ my $ns=($sp=~/([\\\/])/ ? $1 : $^O eq "MSWin32" ? "\\" : "/");
+ my $sq =$sp; $sq =~s/\\/\\\\/g; $sq =~s/\Q$oq\E/\\$oq/g; $sq =eval("$oq$sq$oq");
+ my $tq =$tp; $tq =~s/\\/\\\\/g; $tq =~s/\Q$oq\E/\\$oq/g; $tq ="sub{mkdir($oq$tq$oq,0777) if !-e $oq$tq$oq; $oq$tq$oq}";
+ my $fq =!$fe
+	? 'sub{/.*/}'
+	: $fe=~/^sub\s*\{/
+	? $fe
+	: $fe=~/^(?:eval|do)\s*\{/
+	? "sub{$fe}"
+	: (do{	my $v =$fe;
+		$v=~s/\*\.\*/*/g;
+		$v=~s:(\(\)[].+^\-\${}[|]):\\$1:g;
+		$v=~s/\*/.*/g;
+		$v=~s/\?/.{1,1}/g;
+		"sub{\$_[1]=~/$v/i}"
+		});
+ my($sh,$th);
+ {	local $s->{-echo}=0;
+	$sh =($m eq 'mput'	? $s->lls($o,$sq,$fq,'stat $_',{}) 
+				: $s->rls($o,$sq,$fq,'stat $_',{}))
+		||return($s->error("${m}: cannot list $sq: $!"));
+	$th =($m eq 'mput'	? $s->rls($o,$tq,$fq,'stat $_',{}) 
+				: $s->lls($o,$tq,$fq,'stat $_',{}))
+		||return($s->error("${m}: cannot list $tq: $!"));
+	
+ }
+ foreach my $sn (sort keys %$sh) {
+	next	if !ref($sh->{$sn})
+		|| !defined($sh->{$sn}->[2]);
+	if ($sm && (time() -$s0 >=$sm)) {
+		$s->echo($m,"time is up\n") if $s->{-echo};
+		last
+	}
+	elsif (($sh->{$sn}->[2] & 0040000)) {
+		if ($o =~/r(?![0-])/) {
+			$s->mfpg($m, $o, $sp .$ns .$sn, $tp .$ns .$sn, $fe
+				, $sm ? ($sm -(time() -$s0)) : ())
+			|| return($s->error("${m}: cannot recurse '$sn': $!"));
+		}
+	}
+	elsif (!defined($sh->{$sn}->[7]) || !defined($sh->{$sn}->[9])) {
+		next
+	}
+	else {
+		if (!$th->{$sn}
+		|| (($th->{$sn}->[7]||0) ne ($sh->{$sn}->[7]||0)) # size
+		|| (($th->{$sn}->[9]||0) ne ($sh->{$sn}->[9]||0)) # mtime
+		) {
+			($m eq 'mput'
+			? $s->fput($o, $sq .$ns .$sn, $tp .$ns .$sn)
+			: $s->fget($o, $sq .$ns .$sn, $tp .$ns .$sn))
+			|| return($s->error("${m}: cannot transfer '$sn': $!"));
+		}
+	}
+ }
+ 1
+}
+
+sub mput {	# Put newer multiple files
+		# (?"-'m+r+", 'source', 'target', 'filter', seconds lim) -> success
+	shift->mfpg('mput',@_)
+}
+
+sub mget {	# Get newer multiple files
+		# (?"-'m+r+", 'source', 'target', 'filter', seconds lim) -> success
+	shift->mfpg('mget',@_)
 }
