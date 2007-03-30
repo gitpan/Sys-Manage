@@ -26,6 +26,21 @@ under the same terms as Perl itself.
 =over
 
 
+=item '2007-03-30'
+
+Publishing 0.56 version.
+
+
+=item '2007-03-23'
+
+Fixed L<Sys::Manage::CmdEscort|Sys/Manage/CmdEscort> internal command line escaping condition.
+
+
+=item '2007-03-22'
+
+Fixed L<Sys::Manage::Conn rcmd|Sys/Manage/Conn> quoting of arguments.
+
+
 =item '2007-03-09'
 
 Publishing 0.55 version.

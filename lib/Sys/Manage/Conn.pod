@@ -982,6 +982,12 @@ Saved STDOUT file handle.
 
 =over
 
+
+=item '2007-03-22'
+
+Fixed quoting of arguments in C<rcmd>.
+
+
 =item '2007-02-13'
 
 Fixed error indicators ($!, $^E, $@) transfer translating [\n\r\t].

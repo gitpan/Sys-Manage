@@ -295,7 +295,7 @@ sub execute {		# Execute command (target action)
 						: $v;
 					'"exit !do{' .$v .'}"'}
 				,'--'
-				,$cl ->[1] =~/\b-esc=>1\b/
+				,$cl ->[1] =~/-esc=>1/
 				? $s->qclae(@$cl[2..$#$cl])
 				: $s->qclad(@$cl[2..$#$cl])
 				)

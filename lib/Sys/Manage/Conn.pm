@@ -21,7 +21,7 @@ use IO::Select;
 use Safe;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.55';
+$VERSION = '0.56';
 
 my $qlcl =0;	# quoting local args not needed because of shell quoting
 
@@ -930,7 +930,7 @@ sub rxpnd {	# Expand list to evaluation string (subsequent layer)
 				$v =~s/[\n\r]//g;
 				$v =~s/\\/\\\\/g;
 				if ((scalar(@_) >1) && isqclad($s,$v)) {
-					$v =qclad($s, $v);
+					($v) =qclad($s, $v);
 				}
 				$v =~s/\Q$q\E/\\$q/g;
 				"$q$v$q"
