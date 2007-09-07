@@ -14,16 +14,41 @@ L<Sys::Manage::Schedule|Sys/Manage/Schedule> - Scriptic schedule trunk
 See particular modules.
 
 
-=head1 LICENSE
-
-This is free software; 
-you can use redistribute it and/or modify it 
-under the same terms as Perl itself.
-
-
 =head1 VERSION
 
 =over
+
+
+=item '2007-09-07'
+
+Publishing 0.57 version.
+
+
+=item '2007-08-31'
+
+Extended L<Sys::Manage::Conn::mget|Sys/Manage/Conn>, L<Sys::Manage::Conn::mput|Sys/Manage/Conn>.
+Return codes defined and approvement sub{} added to watch replication.
+Final 'all done' call added to extend L<Sys::Manage::CmdFile|Sys/Manage/CmdFile> command files.
+
+
+=item '2007-08-14'
+
+New L<Sys::Manage::Conn::isscript|Sys/Manage/Conn>.
+
+
+=item '2007-08-13'
+
+L<Sys::Manage::Cmd -dirl|Sys/Manage/Cmd> log truncation dehosed.
+
+Behaviour of L<Sys::Manage::Schedule -logpid|Sys/Manage/Schedule> files
+improved, content changed, cleanup implemented.
+
+
+=item '2007-08-10'
+
+New L<$ENV{SMSECS}|Sys/Manage/Cmd> for time limit.
+Used in L<Sys::Manage::CmdFile|Sys/Manage/CmdFile> 
+and L<Sys::Manage::Conn|Sys/Manage/Conn>.
 
 
 =item '2007-03-30'
@@ -150,9 +175,19 @@ Started
 =back
 
 
+=head1 LICENSE
+
+This is free software; 
+you can use redistribute it and/or modify it 
+under the same terms as Perl itself.
+
+A help in the revival of Pomor'e will be good.
+
 =head1 AUTHOR
 
-Andrew V Makarow <makarow at mail.com>
+
+Andrew V Makarow <makarow at mail.com>,
+for my colleagues
 
 =cut
 

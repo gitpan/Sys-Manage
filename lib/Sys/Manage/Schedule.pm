@@ -18,7 +18,7 @@ use strict;
 use Carp;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.56';
+$VERSION = '0.57';
 
 1;
 
@@ -118,13 +118,10 @@ sub DESTROY {
  }
 
  if ($s->{-logpid} && (length($s->{-logpid}) >1)) {
-	eval{$s->logrdr(undef)} if $s->{-wrlog};
-	my $t =time();
-	while ((-e $s->{-logpid}) 
-	&& !eval{unlink($s->{-logpid})}) {
-		last if time() -$t >3600;
-		sleep(10)
+	if (!unlink($s->{-logpid})) {
+		$s->echolog(join(' ', map {$_ ? ($_) : ()} 'unlink',$s->{-logpid},$!,$^E));
 	}
+	eval{$s->logrdr(undef)} if $s->{-wrlog};
  }
  $s
 }
@@ -430,7 +427,7 @@ sub runlist {	# List OS command as an array
 
 sub runlcl {	# Log os command line
  my $s =shift;	# (command) -> success
- $s->loglck(1);  
+ $s->loglck(1);
  $s->logrdr(0) if !$s->{-wrlog};
  $s->echolog(join(' ',@_));
  my $r  =system(@_);
@@ -485,14 +482,30 @@ sub runlog {	# Log os command execution
 sub cmdfile {	# Shift command file
  $_[0]->{-cmdfile} =eval('use Sys::Manage::CmdFile; Sys::Manage::CmdFile->new()')
 	if !$_[0]->{-cmdfile};
- $_[0]->{-cmdfile}->dofile(@_[1..$#_])
+ my $r =$_[0]->{-cmdfile}->dofile(@_[1..$#_]);
+ if ($_[0]->{-cmdfile}->{-retexc}) {
+	$_[0]->loglck(1);
+	$_[0]->logrdr(0) if !$_[0]->{-wrlog};
+	$_[0]->echolog('cmdfile',$_[0]->{-cmdfile}->{-retexc});
+	$_[0]->{-wrlog}->flush();
+	$_[0]->loglck(0);
+ }
+ $r	
 }
 
 
 sub cmdfck {	# Check command file
  $_[0]->{-cmdfile} =eval('use Sys::Manage::CmdFile; Sys::Manage::CmdFile->new()')
 	if !$_[0]->{-cmdfile};
- $_[0]->{-cmdfile}->dofck(@_[1..$#_])
+ my $r =$_[0]->{-cmdfile}->dofck(@_[1..$#_]);
+ if ($_[0]->{-cmdfile}->{-retexc}) {
+	$_[0]->loglck(1);
+	$_[0]->logrdr(0) if !$_[0]->{-wrlog};
+	$_[0]->echolog('cmdfile',$_[0]->{-cmdfile}->{-retexc});
+	$_[0]->{-wrlog}->flush();
+	$_[0]->loglck(0);
+ }
+ $r
 }
 
 
@@ -704,9 +717,8 @@ sub startup {	# Start schedule execution (internal)
  }
 
  if ($s->{-runmod} =~/^-run/) {			# log/pid file rotator
-	my $lf =$s->vfname('log.txt'); $lf =(-e $lf) && $lf;
 	$s->{-logpid} =$s->vfname() .$$ .'-' .$_[0]->{-prgcn}
-		.$s->{-runmod}
+		.$s->{-runmod}			# pid file
 		.(do{	my $a =$s->{-runarg};
 			# $a =~s/([^a-zA-Z0-9_.-])/uc sprintf("%%%02x",ord($1))/eg;
 			$a =~s/\s/_/g;
@@ -716,8 +728,9 @@ sub startup {	# Start schedule execution (internal)
 			})
 		.'.pid'
 		if $s->{-logpid};
-	$s->{-logpid} =link($lf, $s->{-logpid}) && $s->{-logpid}
-			if $lf && $s->{-logpid};
+	$s->fwrite($s->{-logpid}, $s->strtime() .' ['.$s->{-prgsn} 
+		."] " .$s->{-runmod} .', ' .$s->{-runarg} .', $$' .$$) 
+		if $s->{-logpid};
 	if ($s->{-logmax}			# log file rotator
 	&& ($s->{-logmax} <((-s $s->vfname('log.txt'))||0))) {
 		$s->logrdr(undef) if $s->{-wrlog};
@@ -728,8 +741,25 @@ sub startup {	# Start schedule execution (internal)
 	}
 	$s->vfwrite('>>log.txt', "\n". $s->strtime() .' ['.$s->{-prgsn} 
 		."] " .$s->{-runmod} .', ' .$s->{-runarg} .', $$' .$$);
-	$s->{-logpid} =link($s->vfname('log.txt'), $s->{-logpid}) && $s->{-logpid}
-			if !$lf && $s->{-logpid};
+	local *DIR;				# pid file cleaner
+	if ($s->{-logpid} && $_[0]->{-dirv} && opendir(DIR, $_[0]->{-dirv})) {
+		my $f;
+		my $q ='-' .$_[0]->{-prgcn} .'-';
+		while ($f =readdir(DIR)) {
+			next	if !$f
+				|| ($f !~/\.pid$/i)
+				|| ($f !~/^\d+\Q$q\E/)
+				|| ($s->{-logpid} =~/\Q$f\E$/i);
+			my $n =$_[0]->{-dirv} .$_[0]->{-dirm} .$f;
+			my $t =(stat($n))[8];
+			next	if time() -$t < 60*60*24*5;
+			$s->echolog('unlink',' ',$n
+				, unlink($n)
+				? ()
+				: (map {$_ ? ($_) : ()} ' ',$!,' ',$^E));
+		}
+
+	}
  }
 
  if ($s->{-runmod} =~/^-run/) {			# work dir

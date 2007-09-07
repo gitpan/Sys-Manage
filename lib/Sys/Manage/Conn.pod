@@ -388,6 +388,24 @@ may be mentioned in conditions.
 See also L<Sys::Manage::Cmd -reject|Sys/Manage/Cmd>.
 
 
+
+=item -retbps
+
+	=> 0 || bytes per seconds
+
+Data transfer speed, the last determined by C<fget> or C<fput> value.
+Used in time limit conditions, i.e. in C<mget> and C<mput>.
+
+
+
+=item -retexc
+
+	=> false || true
+
+Mark of excess achieved, i.e. time limit in C<mget> or C<mput>.
+
+
+
 =item -reteval
 
 	=> value or data structure
@@ -565,6 +583,13 @@ With C<-p+> option, archiver will not be used if local file is already packed.
 See also C<rfwrite>.
 
 
+=item isscript ('lib name') -> exists?
+
+Checks if $0 is from library specified,
+alike L<Sys::Manage::Cmd::isscript|Sys/Manage/Cmd>,
+uses $ENV{SMDIR} and $ENV{SMLIB}.
+Useful for C<-reject>.
+
 
 =item lcmd (?-options, command and arguments, ?filter sub{}) -> success
 
@@ -606,33 +631,46 @@ See also C<rls>.
 
 
 
-=item mget (?-options, remote dir, local dir, ?filter, ?time limit) -> success
+=item mget (?-options, remote dir, local dir, ?filter, ?time limit, ?approve sub{}(self,opt,file,file) -> success, ?all done sub{}(self,opt,dir,dir) | method, args) -> success
 
 Replicates multiple remote files to local side.
 Directory entries may be filtered using 'sub{}(path,name,$_=file)' or filemask syntax.
-Limit of time to spend may be specified in seconds.
-
-Example:
-$s->mget('C:\\tmp','c:\\tmp\\1','sub{/\\.(doc|ppt)/}');
+Limit of time to spend may be specified in seconds, L<$ENV{SMSECS}|Sys/Manage/Cmd> will be also considered.
 
 Used C<METHOD CALL OPTIONS>: C<-'>, C<-m>, C<-r>.
+
+Return codes: 1 - done partial (up to time limit), 2 - done all, 3 - nothing todo.
 
 See also C<fget>, C<mput>.
 
+Examples:
+
+$s->mget('C:\\tmp', 'c:\\tmp\\1', 'sub{/\\.(doc|ppt)/}');
+
+$s->mget('C:\\tmp', 'c:\\tmp\\1', 'sub{/\\.(doc|ppt)/}', 'lcmd', 'cmd', '/c', 'dir', 'c:\\tmp\\1');
+
+$s->mget('C:\\tmp', 'c:\\tmp\\1', 'sub{/\\.(doc|ppt)/}', 10, sub{print $_[2],"\n"}, 'lcmd', 'cmd', '/c', 'dir', 'c:\\tmp\\1');
 
 
-=item mput (?-options, local dir, remote dir, ?filter, ?time limit) -> success
+=item mput (?-options, local dir, remote dir, ?filter, ?time limit, ?approve sub{}(self,opt,file,file) -> success, ?all done sub{}(self,opt,dir,dir) | method, args) -> success
 
 Replicates multiple local files to remote side.
 Directory entries may be filtered using 'sub{}(path,name,$_=file)' or filemask syntax.
-Limit of time to spend may be specified in seconds.
-
-Example:
-$s->mput('C:\\tmp','c:\\tmp\\1','sub{/\\.(doc|ppt)/}');
+Limit of time to spend may be specified in seconds, L<$ENV{SMSECS}|Sys/Manage/Cmd> will be also considered.
 
 Used C<METHOD CALL OPTIONS>: C<-'>, C<-m>, C<-r>.
 
+Return codes: 1 - done partial (up to time limit), 2 - done all, 3 - nothing todo.
+
 See also C<fput>, C<mget>.
+
+Examples:
+
+$s->mput('C:\\tmp','c:\\tmp\\1','sub{/\\.(doc|ppt)/}');
+
+$s->mput('C:\\tmp', 'c:\\tmp\\1', 'sub{/\\.(doc|ppt)/}', 10, 'rcmd', 'cmd', '/c', 'dir', 'c:\\tmp\\1');
+
+$s->mput('C:\\tmp', 'c:\\tmp\\1', 'sub{/\\.(doc|ppt)/}', 10, sub{print $_[2],"\n"}, 'rcmd', 'cmd', '/c', 'dir', 'c:\\tmp\\1');
 
 
 
@@ -981,6 +1019,27 @@ Saved STDOUT file handle.
 =head1 VERSION
 
 =over
+
+
+=item '2007-08-31'
+
+Extended C<mget>, C<mput>.
+Return codes defined and approvement sub{} added to watch replication.
+Final 'all done' call added to extend L<Sys::Manage::CmdFile|Sys/Manage/CmdFile> command files.
+
+
+=item '2007-08-14'
+
+New C<isscript>.
+
+
+=item '2007-08-10'
+
+
+New C<-retbps> and C<-retexc>, 
+improved time limit condition in C<mget> and C<mput>.
+
+L<$ENV{SMSECS}|Sys/Manage/Cmd> considered in C<mget> and C<mput>.
 
 
 =item '2007-03-22'

@@ -21,7 +21,7 @@ use IO::Select;
 use Safe;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.56';
+$VERSION = '0.57';
 
 my $qlcl =0;	# quoting local args not needed because of shell quoting
 
@@ -105,6 +105,8 @@ sub initialize {	# Initialize newly created object
 	,-erros1	=>''			# getret() $^E
 	,-erreval	=>''			# getret() $@	-> $@
 	,-reteval	=>undef			# getret() result
+	,-retexc	=>undef			# excess achieved
+	,-retbps	=>0			# bytes per second
 	,-rxpnd0	=>''			# rxpnd() default command
 	,-rxpnd1	=>''			# rxpnd() default options
 	, %$s
@@ -211,6 +213,18 @@ sub set {               # Get/set slots of object
 }
 
 
+sub isscript {		# Is script in given $ENV{SMLIB}
+ my ($s,$l) =@_;	# (lib name)
+ my $d  =$0 =~/[\\\/][^\\\/]+$/ ? $` : '';
+ return(0) if !$d ||!$l ||!($ENV{SMDIR} ||$ENV{SMLIB});
+ my $eb =$ENV{SMDIR} ||'';
+ my $el =$ENV{SMLIB} ||'';
+ return(1) if ($el =~/[\\\/]\Q$l\E$/i) && ($d =~/^\Q$el\E$/i);
+ return(1) if ($d =~/^\Q$eb\E[\\\/]\Q$l\E$/i);
+ 0
+}
+
+
 sub isqclad {		# May need shell quote command line arg
 	$_[1] =~/[&<>\[\]{}^=;!'+,`~\s%"?*|()]/	# ??? see shell
 }
@@ -289,7 +303,7 @@ sub oleerr {		# OLE error message
 
 sub reject {		# Reject condition
  if ($_[0]->{-reject}) {
-	$_[0]->{-rejected} =eval{&{$_[0]->{-reject}}(@_)||''};
+	$_[0]->{-rejected} =eval{&{$_[0]->{-reject}}(@_[1..$#_])||''};
 	$_[0]->{-rejected} =$@ if !defined($_[0]->{-rejected});
 	$_[0]->{-rejected}
  }
@@ -670,7 +684,7 @@ sub connect {		# Connect agent node
  if ($s->{-exec}) {
 	if (!$s->{-argv} || !@{$s->{-argv}}) {
 	}
-	elsif ($s->{-argv}->[0] =~/^(rcmd|reval|fput|rfput|mput|fget|rfget|mget|rdo)/) {
+	elsif ($s->{-argv}->[0] =~/^(rcmd|lcmd|reval|fput|rfput|mput|fget|rfget|mget|rdo)/) {
 		return($s->$1(@{$s->{-argv}}[1..$#{$s->{-argv}}]))
 	}
 	else {
@@ -804,6 +818,7 @@ sub reval {	# Remote Eval perl code
  my $f =ref($_[$#_]) eq 'CODE' ? pop : undef;
  $s->connect if !$s->{''};
  $s->echo('reval','{...}', "\n") if $s->{-echo};
+ $s->{-retexc} =undef;
  $s->reject($s,'reval',$o,@_) && return($s->errject());
  local $s->{-rxpnd0} ='do{';
  local $s->{-rxpnd1} =$o;
@@ -820,6 +835,7 @@ sub rcmd {	# Remote Run OS command
  $s->connect if !$s->{''};
  $s->echo('rcmd', join(' ', map{defined($_) ? (qclad($s,$_)) : ('undef')} $o, @_), "\n") 
 	if $s->{-echo};
+ $s->{-retexc} =undef;
  $s->reject($s,'rcmd',$o,@_) && return($s->errject());
  local $s->{-rxpnd0} ='system{';
  local $s->{-rxpnd1} =$o;
@@ -843,6 +859,7 @@ sub lcmd {	# Local OS command
 		: ('undef')
 		} $o, @_), "\n")
 	if $s->{-echo};
+ $s->{-retexc} =undef;
  $s->reject($s,'lcmd',$o,@_) && return($s->errject());
  if ($f) {
 	$!=$^E=0;
@@ -998,6 +1015,7 @@ sub fget {	# Get remote file
  $s->echo('fget', qclad($s,$o), ' ', qclad($s,$fa), ' '
 	,(($o =~/s(?![0-])/) || !defined($fm) ? '[string]' : (qclad($s,$fm)))
 	,"\n")	if $s->{-echo};
+ $s->{-retexc} =undef;
  $s->reject($s,'fget',$o,@_) && return($s->errject());
  local $s->{-rxpnd0} ='do{';
  local $s->{-rxpnd1} =$o;
@@ -1013,6 +1031,7 @@ sub fget {	# Get remote file
 		$fm =$s->{-tmp} .'.' .$s->sarcfe()
  	}
  }
+ my $t0 =time();
  my $cr ='{open(STDOUT,\'>&OLDOUT\');'
 	.'use IO::File;'
 	.'$!=$^E=0;'
@@ -1091,6 +1110,11 @@ sub fget {	# Get remote file
  }
  else {
 	my $r;
+	if ($fl) {
+		$t0 =time() -$t0;
+		$t0 =$t0 >5 ? $fl / $t0 : 0;
+		$s->{-retbps} =int($t0) if $t0;
+	}
 	if (defined($fz)) {
 		$r =!defined(eval($s->sarcxt($o .'t','$fm','$fz'))) && $@;
 	}
@@ -1118,6 +1142,7 @@ sub fput {	# Put remote file
  $s->echo('fput', qclad($s,$o), ' '
 		,($o =~/s(?![0-])/ ? '[string]' : (qclad($s,$fm)))
 		,' ', qclad($s,$fa), "\n") if $s->{-echo};
+ $s->{-retexc} =undef;
  $s->reject($s,'fput',$o,@_) && return($s->errject());
  local $s->{-rxpnd0} ='do{';
  local $s->{-rxpnd1} =$o;
@@ -1147,6 +1172,7 @@ sub fput {	# Put remote file
 	$fh =eval('use IO::File; 1') && IO::File->new($fm,'r')
 		|| return($s->error("fput: open '$fm': $!"));
  }
+ my $t0 =time();
  my $cr ='{open(STDOUT,\'>&OLDOUT\');'
 	.'use IO::File;'
 	.'$!=$^E=0;'
@@ -1225,6 +1251,11 @@ sub fput {	# Put remote file
 	 ($o =~/m(?![0-])/) || $fu
 	? unlink($fm) || return($s->error("unlink '$fm': $!"))
 	: undef;
+	if (ref($fs) && $fs->[7]) {
+		$t0 =time() -$t0;
+		$t0 =$t0 ? $fs->[7] / $t0 : $t0;
+		$s->{-retbps} =int($t0);
+	}
 	return($s->{-reteval});
  }
  else {
@@ -1257,6 +1288,7 @@ sub lfwrite {	# Write local file
  my $o =$_[0] =~/^-(?:['"\w]['"\w\d+-]*)*$/ ? shift : '-';
  my $f =$_[0]; $f ='>' .$f if $f !~/^[<>]/;
  $s->echo('lfwrite', qclad($s,$o), ' ', qclad($s,$f),"\n") if $s->{-echo};
+ $s->{-retexc} =undef;
  $s->reject($s,'lfwrite',$o,@_) && return($s->errject());
  local *FILE;  open(FILE, $f) || return($s->error("lfwrite: cannot open '$f': $!"));
  my $r =undef;
@@ -1290,6 +1322,7 @@ sub lfread {	# Read local file
 	if ($f =~/^[<>]+/)	{$f0 =$'}
 	else			{$f  ='<' .$f}
  $s->echo('lfread', qclad($s,$o), ' ', qclad($s,$f),"\n") if $s->{-echo};
+ $s->{-retexc} =undef;
  $s->reject($s,'lfread',$o,@_) && return($s->errject());
  local *FILE;  open(FILE, $f) || return($s->error("lfread: cannot open '$f': $!"));
  my $b =undef;
@@ -1439,6 +1472,7 @@ sub rdo {	# Remote do
 			, map {	defined($_) ? (qclad($s,$_)) : ('undef')
 				} $o, (@c ? (@c,$m) : @c), $f, @a)
 		,"\n") if $s->{-echo};
+ $s->{-retexc} =undef;
  $s->reject($s,'rdo',$o,@_) && return($s->errject());
  $s->fput($o, $p, $g
 	, 'do{'
@@ -1483,6 +1517,7 @@ sub rls {	# Remote ls
 
  $s->connect if !$s->{''};
  $s->echo('rls', join(' ', (map {defined($_) ? $s->qclad($_) : ()} $p, $f)), "\n") if $s->{-echo};
+ $s->{-retexc} =undef;
  $s->reject($s,'rls',$o,@_) && return($s->errject());
  local $s->{-rxpnd0} ='do{';
  local $s->{-rxpnd1} =$o;
@@ -1557,6 +1592,7 @@ sub lls {	# Local ls
 		# ? 'filler sub{}', ? container[]{}'') -> list || success
  my $o =$_[0] =~/^-(?:['"\w]['"\w\d+-]*)*$/ ? shift : '-';
  my $oq=$o=~/'/ ? "'" : '"';
+ $s->{-retexc} =undef;
  $s->reject($s,'lls',$o,@_) && return($s->errject());
  my($p, $f, $e, $c) =@_;
  my @r;
@@ -1620,13 +1656,28 @@ sub lls {	# Local ls
 
 
 sub mfpg {	# Put/Get newer multiple files
- my $s =shift;	# (method, ?"-'m+r+", 'source', 'target', 'filter', seconds lim) -> success
- my $m =shift;
+ my $s =shift;	# (method, ?"-'m+r+", 'source', 'target', 'filter', seconds lim)
+ my $m =shift;	#	-> success: 1 - partial, 2 - completed, 3 - not needed
  my $o =$_[0] =~/^-(?:['"\w]['"\w\d+-]*)*$/ ? shift : '-';
- my($sp, $tp, $fe, $sm) =@_;
+ my($sp, $tp, $fe, $sm, @cl) =@_;
+ if ($sm && (ref($sm) ||($sm =~/[^\d]/))) {
+	unshift @cl, $sm;
+	$sm =undef;
+ }
  $s->echo($m, join(' ', (map {defined($_) ? $s->qclad($_) : ()} $sp, $tp, $fe, $sm)), "\n") if $s->{-echo};
+ $s->{-retexc} =undef;
  $s->reject($s,$m,$o,@_) && return($s->errject());
- my $s0=time();
+ my $t0=time();
+ my $sx=$sm;
+ if (defined($ENV{SMSECS}) && ($ENV{SMSECS} ne '')) {
+	$sm =$ENV{SMSECS} if !$sm || ($sm >$ENV{SMSECS});
+	if (!$sm) {
+		$s->{-retexc} ="time is up";
+		return($s->error("${m}: " .$s->{-retexc})) if !$sx;
+		$s->echo($m, $s->{-retexc} ."\n") if $s->{-echo};
+		return(1);
+	}
+ }
  my $oq=$o=~/'/ ? "'" : '"';
  my $ns=($sp=~/([\\\/])/ ? $1 : $^O eq "MSWin32" ? "\\" : "/");
  my $sq =$sp; $sq =~s/\\/\\\\/g; $sq =~s/\Q$oq\E/\\$oq/g; $sq =eval("$oq$sq$oq");
@@ -1644,8 +1695,10 @@ sub mfpg {	# Put/Get newer multiple files
 		$v=~s/\?/.{1,1}/g;
 		"sub{\$_[1]=~/$v/i}"
 		});
+ my $rv =3;
  my($sh,$th);
  {	local $s->{-echo}=0;
+	local $s->{-reject}=undef;
 	$sh =($m eq 'mput'	? $s->lls($o,$sq,$fq,'stat $_',{}) 
 				: $s->rls($o,$sq,$fq,'stat $_',{}))
 		||return($s->error("${m}: cannot list $sq: $!"));
@@ -1655,27 +1708,46 @@ sub mfpg {	# Put/Get newer multiple files
 	
  }
  foreach my $sn (sort keys %$sh) {
+	last if $s->{-retexc};
 	next	if !ref($sh->{$sn})
 		|| !defined($sh->{$sn}->[2]);
-	if ($sm && (time() -$s0 >=$sm)) {
-		$s->echo($m,"time is up\n") if $s->{-echo};
-		last
+	if ($sm && (time() -$t0 >=$sm)) {
+		$s->{-retexc} ="time is up";
+		return($s->error("${m}: " .$s->{-retexc})) if !$sx;
+		$s->echo($m, $s->{-retexc} ."\n") if $s->{-echo};
+		return($rv)
 	}
 	elsif (($sh->{$sn}->[2] & 0040000)) {
 		if ($o =~/r(?![0-])/) {
-			$s->mfpg($m, $o, $sp .$ns .$sn, $tp .$ns .$sn, $fe
-				, $sm ? ($sm -(time() -$s0)) : ())
-			|| return($s->error("${m}: cannot recurse '$sn': $!"));
+			my $v =$s->mfpg($m, $o, $sp .$ns .$sn, $tp .$ns .$sn, $fe
+				, $sm 
+				? (($sm -(time() -$t0)), ref($cl[0]) ? ($cl[0]) : ())
+				: ref($cl[0])
+				? (undef, $cl[0])
+				: ());
+			return($s->error("${m}: cannot recurse '$sn': $!"))
+				if !$v;
+			$rv =1	if $v ==1;
 		}
 	}
 	elsif (!defined($sh->{$sn}->[7]) || !defined($sh->{$sn}->[9])) {
 		next
 	}
 	else {
+		if ($sm && $s->{-retbps}
+		&& (time() -$t0	+(($sh->{$sn}->[7] ||0) /$s->{-retbps}) >=$sm)) {
+			$s->{-retexc} ="time is up at " .$s->{-retbps} ."bps";
+			return($s->error("${m}: " .$s->{-retexc})) if !$sx;
+			$s->echo($m, $s->{-retexc} ."\n") if $s->{-echo};
+			return($rv)
+		}
 		if (!$th->{$sn}
 		|| (($th->{$sn}->[7]||0) ne ($sh->{$sn}->[7]||0)) # size
 		|| (($th->{$sn}->[9]||0) ne ($sh->{$sn}->[9]||0)) # mtime
-		) {
+		) {	next	if ref($cl[0])
+				&& !&{$cl[0]}($s, $o, $sq .$ns .$sn, $tp .$ns .$sn);
+			local $s->{-reject}=undef;
+			$rv =1;
 			($m eq 'mput'
 			? $s->fput($o, $sq .$ns .$sn, $tp .$ns .$sn)
 			: $s->fget($o, $sq .$ns .$sn, $tp .$ns .$sn))
@@ -1683,7 +1755,22 @@ sub mfpg {	# Put/Get newer multiple files
 		}
 	}
  }
- 1
+ if ($rv ==1) {
+	shift @cl if scalar(@cl) && (ref($cl[0]) ||!$cl[0]);
+	if (!scalar(@cl)) {
+	}
+	elsif (ref($cl[0])) {
+		return(&{$cl[0]}($s, $o, $sp, $tp, $fe, $sm))
+	}
+	else {
+		my $cm =shift @cl;
+		return( $cm =~/^(?:rcmd|lcmd|rdo)$/
+			? $s->$cm(@cl)
+			: $s->error("${m}: unanticipated '$cm' final"))
+	}
+	return(2)
+ }
+ $rv
 }
 
 sub mput {	# Put newer multiple files

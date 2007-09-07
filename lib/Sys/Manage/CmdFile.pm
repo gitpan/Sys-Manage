@@ -16,7 +16,7 @@ use IO::File;
 use Fcntl qw(:DEFAULT :flock :seek :mode);
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.56';
+$VERSION = '0.57';
 
 1;
 
@@ -36,7 +36,8 @@ sub new {		# Create new object
 sub initialize {	# Initialize newly created object
  my $s =shift;		# ( ? [command line], ? -option=>value,...)	-> self
  %$s =(
-	# -dofck => undef
+	# -dofck => undef	# checker sign
+	#,-retexc=> undef	# excess achieved sign
 	%$s);
  $s->set(@_);
  $s
@@ -103,8 +104,15 @@ sub iofopen {		# File open
 sub dofile {		# Command queue
 			# (script||sub{}, comfile, ?tgtfile, ?rdrfile) -> success
  my ($s,$fqp,$fqi,$fql,$fqr) =@_;
- my ($dqb, $dqm);
  $s   =Sys::Manage::CmdFile->new() if !ref($s);
+ my $t0 =time();
+ my $ts =10;	# seconds per command
+ my $tx =sub{	return(1) if !defined($ENV{SMSECS}) ||($ENV{SMSECS} eq '');
+		$ENV{SMSECS} =$ENV{SMSECS} -(time() -$t0);
+		$ENV{SMSECS} =0 if $ENV{SMSECS} <0;
+		$t0 =time();
+		1};
+ my ($dqb, $dqm);
  $fqp =scalar(Win32::GetFullPathName($fqp))
 	if !ref($fqp) && ($^O eq 'MSWin32');
  $dqm =!ref($fqp) && $fqp =~/([\\\/])/ ? $1 : $^O eq 'MSWin32' ? '\\' : '/';
@@ -165,10 +173,17 @@ sub dofile {		# Command queue
 	my $pos =0;
 	my $run ='';
 	while (do{$pos=tell($hqi); defined($row =readline($hqi))}) {
-		if (!$row || ($row =~/^\s*#/) || ($row =~/^[\s\r\n]*$/)) {
+		&$tx($s);
+		if (defined($ENV{SMSECS}) && ($ENV{SMSECS} ne '') 
+		&& ($ENV{SMSECS} <$ts)) {
+			$s->{-retexc} ='time is up';
+			$run ='';
+			last;
+		}
+		elsif (!$row || ($row =~/^\s*#/) || ($row =~/^[\s\r\n]*$/)) {
 			next;
 		}
-		if (!$run || !$hql) {
+		elsif (!$run || !$hql) {
 			$run =$row;
 			$run =$` if $run =~/[\r\n\s]+$/;
 			if ($hql) {
@@ -194,7 +209,8 @@ sub dofile {		# Command queue
 				  ? join('', ' 2>>', $s->qclad($fql))
 				  : ''));
 			if (ref($fqp)
-			&& !eval{&$fqp(	  $s->{-dofck}
+			&& !eval{local $ENV{SMSECS} =defined($ENV{SMSECS}) ? $ENV{SMSECS} : '';
+				&$fqp(	  $s->{-dofck}
 					? ($fqi
 					  ,($fql ? $fql : !$fqr ? () : '')
 					  ,($fqr ? $fqr : ()))
@@ -218,7 +234,7 @@ sub dofile {		# Command queue
 				$err =$?>>8;
 			}
 
-			return(!$err)
+			return(&$tx($s) && !$err)
 				if $s->{-dofck};
 
 			$hql =$s->iofopen('>>' .$fql)
@@ -258,7 +274,7 @@ sub dofile {		# Command queue
 					&& ($hqi->autoflush(1)||1)
 					&& $hqi->print($buf .(' ' x ($po1-$pos)))
 					&& truncate($hqi,tell($hqi) -($po1-$pos))
-					|| return($s->error("$! (shift,'$fqi')"));
+					|| return(&$tx($s) && $s->error("$! (shift,'$fqi')"));
 
 					$fqt && unlink($fqt)
 				}
@@ -275,6 +291,7 @@ sub dofile {		# Command queue
 	$hql->close() if $hql;
 	last if !$run || !$hql;
  }
+ &$tx($s);
  !$erc
 }
 

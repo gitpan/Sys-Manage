@@ -20,7 +20,7 @@ use POSIX qw(:sys_wait_h);
 use Data::Dumper;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.56';
+$VERSION = '0.57';
 
 1;
 
@@ -694,7 +694,7 @@ sub cmid {		# New / get command subdirectory
 	my @dir =sort {$asc ? lc($b) cmp lc($a) : lc($a) cmp lc($b)
 			} map { ($_ eq '') || ($_ eq '.') || ($_ eq '..')
 				? ()
-				: -d $_
+				: -d ($lgd .$s->{-dirm} .$_)
 				? $_
 				: ()
 				} readdir(DIR);
@@ -940,6 +940,8 @@ sub execute {		# Execute command (target action) with current options
 				return($s->error("$! (" .join(' ', @arg) .')'))
 			}
 			}, @$cmd);
+		$s->echo("CmdExcess:\t ", $s->{-cmdfile}->{-retexc},'(',@$cmd,')')
+			if $s->{-cmdfile}->{-retexc};
 		$s->{-cerr}->[0] =$e if $e;
 		return(!$e && $r);
 	}

@@ -548,6 +548,16 @@ Used internally for transition from system scheduler.
 
 =over
 
+=item '2007-08-13'
+
+Behaviour of C<-logpid> files improved, content changed, cleanup implemented.
+
+
+=item '2007-08-10'
+
+L<$ENV{SMSECS}|Sys/Manage/CmdFile> may be used for C<cmdfile> and C<cmdfck>.
+
+
 =item  '2007-03-07'
 
 New C<-logpid> to create runtime pid file for monitoring and diagnostics during runtime.

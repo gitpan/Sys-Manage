@@ -801,6 +801,8 @@ $ENV{SMPID}	- management script process id.
 
 $ENV{SMPSWD}	- target element password.
 
+$ENV{SMSECS}	- number of seconds remaining for subsequent operation.
+
 $ENV{SMUSER}	- target element user.
 
 ./	- base directory, C<-dirb>, also may be used for volley script and writing command scripts.
@@ -823,6 +825,15 @@ $ENV{SMUSER}	- target element user.
 =head1 VERSION
 
 =over
+
+=item '2007-08-13'
+
+C<-dirl> log truncation dehosed.
+
+
+=item '2007-08-10'
+
+New $ENV{SMSECS}.
 
 
 =item '2007-03-07'

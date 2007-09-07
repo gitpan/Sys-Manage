@@ -25,3 +25,4 @@ lib/Sys/Manage/Conn.pm
 lib/Sys/Manage/Conn.pod
 lib/Sys/Manage/Schedule.pm
 lib/Sys/Manage/Schedule.pod
+META.yml                                 Module meta-data (added by MakeMaker)

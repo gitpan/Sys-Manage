@@ -57,6 +57,12 @@ Name of the command file be processing,
 may be used in L<Sys::Manage::Cmd|Sys/Manage/Cmd> script to verify permission.
 
 
+=item $ENV{SMSECS}
+
+Number of seconds to spend for processing.
+Decremented by C<dofck> and C<dofile> for subsequent operation.
+
+
 =back
 
 =head1 LICENSE
