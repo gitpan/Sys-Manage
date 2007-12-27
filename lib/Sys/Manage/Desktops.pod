@@ -1,0 +1,1140 @@
+=head1 NAME
+
+Sys::Manage::Desktops - Centralised management for desktop computers
+
+
+=head1 SYNOPSIS
+
+=over
+
+=item Script
+
+use Sys::Manage::Desktops;
+
+my $s =Sys::Manage::Desktops->new(-option=>value,..);
+
+$s->set(-option=>value,..); # See C<Script Configuration>
+
+$s->{C<-dla>} =[{-option=>value,..} # See C<Assignment Parameters>
+
+	,...];
+
+$s->Run(@ARGV); # See C<Command line>
+
+
+=item Command line
+
+perl C<Script>.pl run-mode args
+
+command line may be used (with appropriate run mode)
+as C<startup>, C<shutdown>, C<logon>, C<logoff> script.
+
+Maintenance command line 'perl C<Script>.pl C<refresh>' is to be used 
+against management computer only.
+
+See C<Run Modes>.
+
+
+=back
+
+=head1 DESCRIPTION
+
+=item Description
+
+This is a core module for script implementing assignments 
+of commands to be executed on desktop computers.
+
+The C<Script> may define and organise 
+commands or scripts to be executed every
+C<startup>, C<logon>, C<logoff>, C<shutdown>, as described with C<-under>.
+Commands may be addressed to particular computers, users, groups.
+User will not be asked to agree with any C<startup>, C<logon>, C<logoff>, C<shutdown>.
+
+The C<Script> may provide assignments of commands to be executed once,
+C<-under> 'C<system>' or 'C<user>', within appropriate C<Run Modes>: C<startup>, C<logon>, C<runapp>, C<agent>.
+Assignments may be addressed to particular computers, users, groups.
+The assignments to be executed will be listed for user to agree.
+The assignments will be executed only when user agrees.
+The execution of assignment may interact with user.
+
+The recurrent and non-recurrent assignments are unified 
+and may be distinguished with C<-under> value:
+Recurrent assignments: C<startup>, C<logon>, C<logoff>, C<shutdown>.
+Non-recurrent assignments: 'C<system>', 'C<user>'.
+
+The organising means includes lists of
+assignments to be previously executed (C<-doid>);
+computers, users and groups assignments to executed for (C<-nodes>, C<-users>).
+
+The debug and correcting means includes
+time-based redo of assignment (C<-doop>);
+agent remote activation and changing periodicity (C<agent say>).
+
+
+This module does not assumes anything about repository of commands or scripts.
+
+L<Sys::Manage::Cmd|Sys/Manage/Cmd> module implements assignments, but
+synchronous and without interaction to user.
+
+
+=head1 RUN MODES
+
+=over
+
+=item Run Modes
+
+Maintenance or management run modes:
+C<query> to list assignments;
+C<refresh> to be used against manager computer only;
+C<agent say> to be used from manager side.
+
+Desktop or agent run modes may be used against desktop or agent system:
+C<startup>, C<logon>, C<agent>, C<runapp>, C<logoff>, C<shutdown>.
+
+Scriptic run modes may be used to define or organise appropriate scripts:
+C<startup>, C<logon>, C<logoff>, C<shutdown> for desktop or agent system.
+See also C<startup1> and C<logon1> C<Script Modes>.
+
+Run modes to check or execute assignments 
+(with appropriate C<Assignment Modes>) on desktop or agent system:
+C<startup> and C<agent> to execute C<system> assignments;
+C<logon> and C<runapp> to check C<system> and to execute C<user> assignments.
+
+Windows 95/98: C<startup> executed in C<logon>;
+C<agent>, C<logoff>, C<shutdown> unimplemented.
+
+Windows 2000/XP: all C<Run Modes> implemented;
+C<agent> uses 'at' Scheduler commands, may be activated via 'C<startup period>' command line.
+
+
+=item agent (start | stop | loop | apply) ?minutes
+
+Periodical agent operation.
+C<system> assignments may be executed.
+C<user> assignments may be checked.
+
+This item is very platform dependent, see C<Limitations, Bugs, Problems>.
+
+
+=item agent say
+
+=item agent say node ?minutes
+
+=item agent say node -redo assignmentId
+
+=item agent say node -unreg assignmentId
+
+=item agent say node agent action...
+
+Activate agent from manager via L<Sys::Manage::Conn|Sys/Manage/Conn>(C<-conn>).
+Default action is 'C<agent> loop'.
+Immediate actions '-redo' and '-unreg' may be used instead of 
+assignment with C<-doop> => [[-redo=>id] || [-unreg=>id]].
+See C<agent> for other actions available, i.e. 'C<agent> stop'.
+
+
+=item logoff
+
+Execute	logoff scripts
+
+
+=item logon
+
+Execute C<logon> scripts (C<-under> => 'C<logon>'),
+then user level assignments (C<-under> => 'C<user>') may be executed.
+Complete with post-logon scripts (C<-under> => 'C<logon1>').
+
+
+=item query
+
+	query runmode|'undef'|'' ?node|'undef' ?user|'undef'
+
+Queries assignments database, displays result.
+Maintenance run mode.
+
+
+=item refresh
+
+=item refresh pressing
+
+Maintenance run mode, to be executed against manager only.
+Refreshes application startup scripts, etc.
+See also C<runapp>, C<-mcf>, C<-fresh>.
+
+
+=item runapp
+
+Application startup operation.
+The C<Script> is called if C<-fresh> from application startup script generated 
+by C<refresh> for C<-mcf>.
+C<system> and C<user> assignments will be checked, 
+C<user> assignments may be executed.
+
+
+=item shutdown
+
+Execute	shutdown scripts
+
+
+=item startup
+
+Execute startup scripts (C<-under> => 'C<startup>'),
+then system level assignments (C<-under> => 'C<system>') may be executed.
+Complete with post-startup scripts (C<-under> => 'C<startup1>').
+
+
+=item startup period
+
+=item startup agent 
+
+=item startup agent start period
+
+Execute C<startup>, start C<agent>, if appropriate.
+
+
+=back
+
+
+
+=head1 SCRIPT MODES
+
+=over
+
+=item Script Modes
+
+C<-under> assignment parameter may be used to define
+C<startup>, C<logon>, C<logoff>, C<shutdown> scripts,
+and also post-C<startup> and post-C<logon> scripts.
+
+Post-C<startup> scripts will be executed after C<startup> scripts and C<startup> C<system> assignments.
+
+Post-C<logon> scripts will be executed after C<logon> scripts and C<logon> C<user> assignments.
+
+
+=item logon1
+
+C<-under> => 'C<logon1>'
+
+Post-logon scripts to complete C<logon> process.
+
+
+=item startup1
+
+C<-under> => 'C<startup1>'
+
+Post-startup scripts to complete C<startup> process.
+
+
+
+
+=back
+
+=head1 ASSIGNMENT MODES
+
+=over
+
+=item Assignment Modes
+
+C<-under> assignment condition may be one of C<Run Modes>, C<Script Modes>, or C<Assignment Modes>.
+
+Assignments under C<Run Modes> and C<Script Modes> are executed at each run of the C<Script>.
+
+Assignments under C<Assignment Modes> are executed once during appropriate C<Run Modes>:
+C<startup>, C<logon>, C<agent>, C<runapp>.
+
+System level assignments (C<-under> => 'C<system>') will be executed
+before user level assignments (C<-under> => 'C<user>').
+
+See also C<Description>, C<Run Modes>.
+
+
+=item system
+
+C<-under> => 'C<system>'
+
+The assignment should be executed under C<system> session with 
+considerable permissions.
+Users profiles may be affected via something like C<w32regenu>.
+
+
+=item user
+
+C<-under> => 'C<user>'
+
+The assignment should be executed under C<user> session 
+with permissions of the user
+and user's profile available.
+
+
+=back
+
+
+=head1 SCRIPT CONFIGURATION
+
+=over
+
+=item Script Configuration
+
+Maintenance run mode (C<refresh>) may need special values for:
+C<-dirmcf>.
+
+The most commonly used parameters are:
+C<-banner>, C<-support>, C<-mgrcall>, C<-dirmcf>,
+C<-dhu>, C<-dhn>,
+C<-dla>, C<-xnodes>, C<-xusers>
+
+
+=item -banner
+
+	=> "Centralised management for desktop computers\n"
+
+Text to display starting execution.
+See also C<-lang>, C<-support>.
+
+
+=item -conn
+
+	=> empty || {-option => value} || config file name
+
+Configuration for L<Sys::Manage::Conn|Sys/Manage/Conn> object
+to be used for C<agent say>.
+
+
+=item -dhn
+
+	=> undef || {node name => [group names]}
+
+Node groups database, used to match assignment C<-nodes>.
+If undefined, OS system catalogue may be used and slow performance.
+If C<-dla> text file, may be reassigned from its C<-dhn> rows when matched.
+See also C<-dhu>.
+
+
+=item -dhu
+
+	=> undef || {user name => [group names]}
+
+User groups database, used to match assignment C<-users>.
+If undefined, OS system catalogue may be used and slow performance.
+If C<-dla> text file, may be reassigned from its C<-dhu> rows when matched.
+See also C<-dhn>.
+
+
+=item -dircrs
+
+	=> $ENV{SystemRoot} .'\\' .$s->{-prgcn}
+	|| '/var/' .$s->{-prgcn}
+
+Path to C<system> client/agent registrations of assignments.
+Each C<system> assignment executed will be registered as a file
+named according to assignment C<-id> under this path.
+An assignment may be duplicated also inward C<-dirmrs>.
+
+
+=item -dircru
+
+	=> $ENV{AppData} .'\\' .$s->{-prgcn}
+	|| $ENV{HOME} .'/' .$s->{-prgcn}
+
+Path to C<user> client/agent registrations of assignments.
+Each C<user> assignment executed will be registered as a file
+named according to assignment C<-id> under this path.
+An assignment may be duplicated also inward C<-dirmru>.
+
+
+=item -dirmcf
+
+	=> '%LOGONSERVER%\\NetLogon\\' .$s->{-prgcn} .'-mcf'
+
+Path to menu command files or application startup scripts for C<-mcf> and C<refresh>.
+
+
+=item -dirmls
+
+=item -dirmlu
+
+	=> undef
+	|| 'directory' for 'node/id' or 'node-user/id' files
+	|| file path mask 'directory/[n][-u]/[f][e]'
+	|| file path mask 'directory/[n]/[f][-ul][e]'
+	|| ...
+
+File paths for log files on manager.
+Will be assigned to C<$ENV{SMLOG}>
+for C<startup>, C<logon>, C<logoff>, C<shutdown> scripts.
+Subdirectories will be created when required.
+Path mask may be used with symbols following:
+
+	[SignValSign] - value with optional markup signs, value may be:
+	n	- node name,
+	u	- user name,
+	us	- user name or 'sys',
+	ul	- user name or getlogin(),
+	uw	- user name or getlogin() on Windows 95/98, else 'sys',
+	f	- file name (assignment id),
+	e	- file name extension, including '.'
+
+
+=item -dirmrs
+
+=item -dirmru
+
+	=> undef || see '-dirmls' and '-dirmlu'
+
+File paths to duplicate C<-dircrs> and C<-dircru> registrations to inform manager.
+Subdirectories will be created when required.
+See C<-dirmls> and C<-dirmlu> for path mask.
+Consider synchronisation procedure globing mask 
+to be obtained using replacement of '[f][e]' symbols with '*'.
+Avoid mixing C<-dirmls>, C<-dirmrs>, C<-dirmlu>, C<-dirmru> files
+in the same directories or carefully consider naming of files.
+
+
+=item -dla
+
+	=>[{id=>'identifier',...}, ...] | 'file name'
+
+Assignments and commands database to find assignments/commands to be executed.
+See also C<Assignment Parameters>.
+
+Assignments database may be a perl data structure (array ref) or a text file.
+Text database format:
+
+	# comment row
+	-dhn=>['node name','group name',...]	# node groups
+	...
+	-dhu=>['user name','group name',...]	# user groups
+	...
+	-id=>'name'	# starting assignment
+	-attr=>value	# parameter of assignment, use perl syntax for value
+	...
+
+
+=item -domain
+
+	=> domain name
+
+Domain of the user current, see also C<-user>.
+
+
+=item -errhndl
+	
+	=> 0 | 1 | sub{}
+
+Error handler on $SIG{__DIE__}.
+
+
+=item -host
+
+	=> host name
+
+Full DNS name of the computer current, see also C<-node>
+
+
+=item -hostdom
+
+	=> host domain
+
+Domain part of the C<-host>.
+
+
+
+=item -lang
+
+	=> 'en' | 'ru'
+
+Language of user.
+See also C<-banner>, C<-support>
+
+
+=item -mgrcall
+
+	=> "perl $0"
+
+Management script call from desktop (agent) systems.
+To be used for C<agent> and C<refresh>(C<-mcf>, C<-fresh>).
+
+
+=item -node
+
+	=> node name
+
+Node name of the computer current, may be short of the C<-host>.
+
+                                 
+
+=item -prgcn
+
+	=> 'Sys-Manage-Desktops'
+
+Program class name, used to construct another names.
+
+
+=item -runmode
+
+	=> ''
+
+Run mode, see C<Command line>, C<Run Modes>.
+
+
+
+=item -runrole
+
+	=> '' | ('mngr' | 'manager') | ('agent' | 'desktop') | 'query'
+
+C<Script> run role to limit C<Run Modes> in C<Run>() to
+management or maintenance, agent or desktop, query.
+This may be useful programmatically limiting domain of the C<Script>
+for parcticular nodes (i.e. C<w32dcf> or C<w32srv>) or users.
+
+
+
+=item -smtpsrv
+
+	=> not exists || 'smtp server name'
+
+=item -smtpeto
+
+	=> not exists || ['e-mail address',...]
+
+SMTP server name (for C<smtpsend>) and addressee list to receive errors.
+May be useful while C<-yerr>.
+
+
+
+=item -support
+
+	=> "Call support or press 'Enter' finishing"
+
+Text to display finishing with error(s).
+See also C<-lang>, C<-banner>.
+
+
+
+=item -user
+
+	=> user name
+
+=item -uadmin
+
+	=> is admin user?
+
+=item -usystem
+
+	=> is system user?
+
+User current, see also C<-domain>, C<-node>.
+
+
+
+=item -xnodes
+
+=item -xusers
+
+	=> undef || 'name' || ['name',...]
+
+
+Exclusive nodes and users assignments should not be executed to.
+
+
+=item -yasg
+
+	=> undef || boolean
+
+Assume 'yes' to execute assignments during C<startup> and C<logon>,
+do not ask user.
+
+
+=item -yerr
+
+	=> undef || boolean
+
+Assume 'yes' confirming error messages,
+do not ask user.
+May be used along with C<-smtpeto>.
+
+
+=back
+
+
+=head1 ASSIGNMENT PARAMETERS
+
+=over
+
+=item Assignment Parameters
+
+Assignments and commands are organised in assignments database, C<-dla>.
+
+The most used parameters of assignment are:
+C<-id>, C<-cmt>, C<-under>, C<-nodes>, C<-users>, C<-do>, C<-doid>, C<-doop>.
+
+
+
+=item -cmt
+
+	=> comment string
+
+Description of assignment.
+
+
+
+=item -cnd
+
+	=> empty | sub{}(self, assignment)
+
+Execution condition.
+More preferred is using C<-nodes>, C<-users>, C<-doid>, C<-doop>.
+
+
+=item -do
+
+	=> empty | command line | ?! command line
+
+Command line to be executed to apply assignment.
+
+Optional starting char may be used to interpret exit code:
+'?' - success if 0, 
+'!' - success if not 0.
+Default operation ignores exit code.
+
+Embedded 'do perl-script-file' comand evaluates file given as sub{}(self, assignment).
+Some of C<Methods> may be called.
+Empty result will be considered as faiure.
+
+
+
+=item -doid
+
+	=> empty | assignment id | [assignment id,...]
+
+Assignments to be executed before this assignment.
+Will be listed to user to agree.
+
+
+=item -doop
+
+=item -doop1
+
+	=> empty | [[-operation => assignment id],...]
+
+Operations to be executed before (C<-doop>) and after (C<-doop1>) this assignment, 
+but not listed to user.
+Operations available:
+
+-unreg => id - unregister assignment
+
+-unreg => id, time-string - unregister if registered before time specified
+
+-redo => id, time-string - unregister and execute again, if registered before time specified
+
+-unmenu => id - delete C<-menu> and C<-mcf> items from menu
+
+The C<-unreg>=>(id, 'yyyy-mm-dd hh:mm:ss') and C<-redo>=>(id, 'yyyy-mm-dd hh:mm:ss') 
+operations of C<-doop> may be used effectively in debug procedures.
+The assignment of this operation only 
+will not be registered,
+may be executed repeatable with different time specified,
+will be listed to user only when applicable.
+
+
+=item -fresh
+
+	=> empty | assignments overcovering
+
+If this assignment is overcovered by newer assignments.
+Used only in C<refresh> to include C<-mgrcall> into
+menu command files for C<-mcf> items.
+
+
+
+=item -id
+
+	=> unique identifier
+
+Unique identifier of assignment and name of registration file.
+
+
+
+=item -last
+
+	=> empty | true
+
+Requests user to restart computer, breaks execution of the list of assignments.
+
+
+
+=item -mcf
+
+	=> empty | [{param => value,..},..]
+
+Menu items to be creted for execution via command files.
+The C<-mcf> optional parameter with C<-id> 
+describes the name of command file within C<-dirmcf>.
+See C<-menu> for another details, C<refresh> and C<-fresh> for usage.
+
+This item is very platform dependent, see C<Limitations, Bugs, Problems>.
+
+
+=item -menu
+
+	=> empty | [{parameter => value,..},..]
+
+Menu items to be created, see also C<-mcf>.
+'Name' parameter contains menu item name.
+
+Platform dependent.
+For Windows see L<Win32::Shortcut|Win32/Shortcut> and it's parameters:
+'Path', 'Arguments', 'WorkingDirectory', 'Description', 'ShowCmd', 'Hotkey', 'IconLocation', 'IconNumber'.
+'Name' may be started with 'Programs', 'Desktop' or 'Startup' subdirectory term.
+For C<system> assignments will be used 'All Users' menu,
+for C<user> assignments will be used current user menu.
+
+This item is very platform dependent, see C<Limitations, Bugs, Problems>.
+
+
+=item -nodes
+
+	=> empty | 'none' | 'name' | [name,...]
+
+On which nodes (computers) assignment should be executed (except C<-xnodes>).
+May be used group names from C<-dhn>.
+Empty value means all nodes; 'none' value allows execution only via C<-doid> or C<-doop>.
+
+
+
+=item -since
+
+	=> empty | 'yyyy-mm-dd hh:mm:ss'
+
+Date-time since assignment should be executed.
+
+
+
+=item -under
+
+	=> empty | 'system' | 'user' | 'startup' | 'logon' | 'logoff' | 'shutdfown'
+
+How to execute assignment:
+at each C<startup>, C<logon>, C<logoff>, C<shutdown>,
+or once under C<user> or C<system> session.
+Empty value treated as C<system>.
+See also C<Run Modes>, C<Assignment Modes>.
+
+
+
+=item -users
+
+	=> empty | 'none' | 'name' | [name,...]
+
+For which users assignment should be executed (except C<-xusers>).
+May be used group names from C<-dhu>.
+Empty value means all users; 'none' value allows execution only via C<-doid> or C<-doop>.
+
+
+
+=back
+
+=head1 ENVIRONMENT VARIABLES
+
+=over
+
+=item Environment Variables
+
+May be used in command lines to be executed.
+
+
+=item $ENV{SMID}
+
+ID of the assignment running.
+
+
+=item $ENV{SML1}
+
+=item $ENV{SML2}
+
+First and last parts of file path to upload to manager.
+Obtained using C<-dirmls> or C<-dirmlu>.
+For C<startup>, C<shutdown>, C<logon>, C<logoff> scripts
+this is C<$ENV{SMLOG}> broken on C<$ENV{SMID}>.
+
+
+=item $ENV{SMLOG}
+
+Registration file path and name, may be used for output of the command.
+May contain blanks and may need to be quoted in command lines,
+i.e. cmd.exe /c dir c:\\>>"%SMLOG%".
+For C<startup>, C<shutdown>, C<logon>, C<logoff> scripts
+this is log file name formed using C<-dirmls> and C<-dirmlu>.
+
+
+
+=back
+
+
+=head1 METHODS
+
+=over
+
+=item Methods
+
+Useful for C<Script>:
+C<new>, C<set>, C<fread>, C<w32dcf>/C<w32srv>, C<Run>
+
+Useful for C<-do> => 'do perl-script-file':
+C<fcopy>, C<fedit>;
+C<w32olenew>, C<w32oleget>, C<w32olein>;
+C<w32registry> and C<w32regenu>;
+C<w32wmiq> and C<w32wmiqf>;
+C<acRegDel>, C<acRegRen>, C<meDel>;
+C<echo>, C<error>;
+and others
+
+Most of methods will die if fail.
+So, success/failure return value is often not needed.
+
+
+
+=item acReg ({assignment}) -> fwrite() | die
+
+=item acReg ({assignment}, string,...) -> fwrite() | die
+
+Assignment call registration.
+C<acReg>({assignment}) creates registration file using C<fwrite>(),
+C<acReg>({assignment}, string,...) appends strings to this file.
+
+
+=item acRegDel ({assignment}) -> unlink() | die
+
+=item acRegDel ({assignment}, ? max mtime string) -> unlink() | die
+
+Assignment call registration delete.
+Deletes registration file using C<unlink>(),
+returns 0 if there is nothing to be deleted.
+Max C<mtime> of the registration file to be deleted may be specified
+as 'yyyy-mm-dd hh-mm-ss'; 
+registration file will not be deleted if its C<mtime> is greater then specified.
+
+
+=item acRegRen ({assignment}, extension) -> rename() | die
+
+Assignment call registration rename.
+Renames registration file to new extension
+using C<rename>().
+I.e. C<acRegRen>({...},'.err').
+
+
+=item echo (args) -> print (args).
+
+Output to user. Alike C<print>().
+
+
+=item error (message) -> die
+
+Failure exit.
+
+
+=item fcopy (?-opt, source file | dir | dir mask, target file | base dir | dir, condition sub(self, source, target){}) -> copied | die
+
+=item fcopy (source file, target file)
+
+=item fcopy (source file, target base dir)
+
+=item fcopy (source dir, target base dir)
+
+=item fcopy (source dir/mask, target dir)
+
+Copy files and directories.
+
+
+=item fedit (file, sub(self, file, $_=content){} -> new content) -> fwrite() | die
+
+Edit file.
+Loads file using C<fread>(file),
+executes editor sub{} to achieve new content,
+stores content changed using C<fwrite>(file).
+
+
+=item fglob (path with mask) -> (dir list) | die
+
+Directory listing.
+
+
+=item fpthtmp (?{assignment}, ?mkdir) -> temp dir may be created
+
+Path to temporary directory for C<Script> or assignment.
+The second parameter is boolean to create directory if not exists.
+See also C<ftmp>.
+
+
+=item fread (?'-b', file name) -> content | die
+
+Reads file, returns it's content as a scalar.
+
+
+=item ftmp (?assignment, ?pid) -> temp file name
+
+Temporary file for C<Script> or assignment.
+See also C<fpthtmp>.
+
+
+=item fwrite (?'-b', file name, string,...) -> true | die
+
+Writes strings joined with "\n" to file.
+
+
+=item meDel ({assignment}) -> true | die
+
+Deletes user shell menu elements (C<-menu>, C<-mcf>) for assignment.
+
+
+=item meStore ({assignment})
+
+Creates user shell menu elements (C<-menu>, C<-mcf>) for assignment.
+
+
+=item new (-option => value,..) -> object
+
+Constructor to create new object.
+
+
+=item Run (command line args)
+
+Executes C<Script Configuration> assigned by C<Script>.
+
+
+=item set () -> (slot names of the object)
+
+=item set (-option) -> value of the option given
+
+=item set (-option=>value,...) -> self object
+
+Retrieves and sets values of the C<Script Configuration>.
+$s->{-option} direct access may be used also, 
+but C<set> smartly processes some options.
+
+
+=item w32ADSystemInfo () -> IADsADSystemInfo object
+
+=item w32ADComputer () -> IADsComputer object
+
+Windows 2000.
+Access to ADSI objects, see MSDN for details.
+Example: w32ADSystemInfo->{DomainShortName}
+
+
+=item w32dcf () -> netlogon scripts dir if DC
+
+Windows 2000 DC.
+Path to 'scripts' subdirectory in 'netlogon' share if domain controller.
+See also ‘<w32srv>.
+
+
+=item w32olenew (progid, ?destructor) -> object | die
+
+Win32.
+L<Win32::OLE|Win32/OLE>->new(args) call (may be known also as 'CreateObject').
+'Scripting.FileSystemObject', 'WScript', 'WScript.Shell', 'WScript.Network'
+objects may be created.
+
+
+=item w32oleget (moniker, ?destructor) -> object | die
+
+Win32.
+L<Win32::OLE|Win32/OLE>->GetObject(args) call.
+
+
+=item w32olein (object) -> enumerated
+
+Win32.
+L<Win32::OLE|Win32/OLE>::in(object) call.
+
+
+=item w32oleerr () -> last error message string
+
+Win32.
+L<Win32::OLE|Win32/OLE>->LastError() formatted.
+
+
+=item w32registry (?key) -> {registry}
+
+Win32.
+$L<Win32::TieRegistry|Win32/TieRegistry>::Registry wrapper.
+
+
+=item w32regenu (sub(self, key name, $_ ={key hash}, profile dir){})
+
+Win32 (Windows 95 not recommended).
+Enumerates users registry files for sub{} given.
+Calls sub{} with relevant L<Win32::TieRegistry|Win32/TieRegistry> subtree
+for each user profile.
+May be useful for C<system> assignments affecting user profiles.
+
+
+=item w32srv () -> is Windows Server
+
+Win32. Returns true for Windows server or domain controller.
+See also C<w32dcf>.
+
+
+=item w32wmiq (class | query) -> SWbemObjectSet
+
+=item w32wmiqf (class | query) -> first object
+
+=item w32wmiqf (class | query, iterator sub(self, $_ = object){})
+
+Win32.
+Access to WMI executing query and fetching object(s) via
+L<Win32::OLE|Win32/OLE>::in(C<w32oleget>('winmgmts:{impersonationLevel=impersonate}!//node/root/cimv2')->ExecQuery(query | 'select * from class')).
+Where class may be 'Win32_OperatingSystem', 'Win32_ComputerSystem', etc, see MSDN for details.
+Examples: w32wmiqf('Win32_OperatingSystem')->{ProductType}, w32wmiqf('Win32_ComputerSystem')->{Model}.
+
+
+=back
+
+=head1 EXAMPLES FOR WINDOWS
+
+=over
+
+=item Smserver.bat
+
+Defines single management server across domain
+in %SMSERVER% environment variable.
+Should be placed inside 'Netlogon' share on domain controller.
+
+	@rem Defines single management server in the domain.
+	@rem Smserver.bat - echoes %SMSERVER%.
+	@rem Smserver.bat command line - executes command line with %SMSERVER% defined.
+	@rem Use ^%SMSERVER^% notation in command line.
+	@set SMSERVER=\\servername
+	@if "%1" == "" @echo %SMSERVER%
+	@if not "%1" == "" call %*
+
+=item Smserver.pl
+
+C<Script> implementation.
+Should be placed inside 'Netlogon' share on domain controller.
+
+	#!perl -w
+	my $script =Win32::GetFullPathName($0);
+	my $domain =eval('use Net::Domain; Net::Domain::hostdomain') 
+		||Win32::DomainName() ||$ENV{USERDOMAIN};
+	my $spath =$script =~/^(.+?)[\\\/][^\\\/]+$/ 
+			? $1
+			: $ENV{LOGONSERVER}
+			? "$ENV{LOGONSERVER}\\NetLogon"
+			: "\\\\$domain\\NetLogon";
+	eval{require ("$spath\\Desktops.pm")}
+		||eval{require Sys::Manage::Desktops}
+		||die('Cannot load Sys::Manage::Desktops');
+	my $s=Sys::Manage::Desktops->new(-errhndl=>1);
+
+	if (!$ENV{SMSERVER} && $ARGV[0]) {	# %SMSERVER% read
+		$s->fread("$spath\\SMServer.bat") =~/set\s*SMSERVER\s*=\s*([^\r\n\s]+)/
+		? $ENV{SMSERVER} =$1
+		: $s->error("Missing %SMSERVER%\n");
+	}
+	if ($s->w32dcf()) { 			# DC - Run on Manager
+		$s->set( -mgrcall=> "perl.exe \\\\$domain\\NetLogon\\" .$s->{-prgsn}
+			,-dirmcf => "$ENV{SMSERVER}\\SMShare"
+			);
+	}
+	else {					# Agent Run
+		$s->set( -mgrcall=> ($ENV{PERLPATH}||'') ."perl.exe $script"
+			,-dirmcf => "%SMSERVER%\\SMShare"
+			);
+	}
+
+	$s->{-runrole} =$s->w32srv()		# Limit agent to desktops
+			? 'mngr' : '';
+	$s->{-dla} ="$spath\\smserver.txt";	# Assignments Database
+
+	$s->Run(@ARGV);				# Evaluate $ARGV[0] operation
+
+
+=item Group Policy
+
+To configure C<startup> and C<logon> scripts.
+
+	Security: user, computer$: Apply
+	Options:
+	Computer Configuration / Windows Settings / Scripts
+		Startup = ..\..\..\..\..\Scripts\SMServer.bat perl ^%0\..\smserver.pl startup agent
+	Computer Configuration / Administrative Templates / System / Scripts
+		Run Startup Scripts Visible = +
+		Maximum wait time for Group Policy scripts = (default=600 sec)
+	User Configuration / Windows Settings / Scripts 
+		Logon = ..\..\..\..\..\Scripts\SMServer.bat perl ^%0\..\smserver.pl logon
+	User Configuration / Administrative Templates / System / Scripts
+		Run Logon Scripts Visible = +
+
+
+=back
+
+=head1 LIMITATIONS, BUGS, PROBLEMS
+
+=over
+
+=over
+
+=item Limitations, Bugs, Problems
+
+
+This module is implemented and tested with Perl 5.6.0 and 5.8.8 on Windows 2000/XP.
+
+Implementation predominantly for Windows desktops,
+espacially C<-menu> and C<-mcf>, C<agent>, 'w32' functions.
+
+Linking C<system> and C<user> assignments with C<-doid> or C<-doop> is undesirable.
+
+Mixing C<system> assignments with C<-users> condition is undesirable,
+however C<-nodes> condition may be in C<user> assignments.
+
+Startup or logon scripts may be liable to timeouts
+or may became hidden from user, 
+so response timeouts used interacting with user.
+
+See also at the top of the source code.
+
+
+=back
+
+=head1 VERSION
+
+=over
+
+=item '2007-12-27'
+
+Publishing.
+
+
+=item '2007-11-30'
+
+Testing...
+
+
+=item '2007-10-24'
+
+Documentation written.
+
+
+=item '2007-10-04'
+
+Started.
+
+
+=back
+
+=head1 LICENSE
+
+This is free software; 
+you can use redistribute it and/or modify it 
+under the same terms as Perl itself.
+
+
+
+=head1 AUTHOR
+
+Andrew V Makarow <makarow at mail.com>, for zhenya
+
+=cut
+

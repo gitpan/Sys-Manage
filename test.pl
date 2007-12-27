@@ -3,7 +3,7 @@ use strict;
 use Test;
 
 
-BEGIN { plan tests => 9 + 1 + ($^O eq 'MSWin32' ? 4 : 0) +5}
+BEGIN { plan tests => 9 + 1 + ($^O eq 'MSWin32' ? 4 : 0) +6}
 
 if (1) {
    print "\nRequired modules:\n";
@@ -32,7 +32,7 @@ if ($^O eq 'MSWin32') {
 
 if (1) {
    print "\nPackaged modules:\n";
-   foreach my $m ('Cmd','CmdEscort','CmdFile','Conn','Schedule') {
+   foreach my $m ('Cmd','CmdEscort','CmdFile','Conn','Schedule','Desktops') {
      print "use Sys::Manage::${m}\t";
      ok(eval("use Sys::Manage::${m}; 1"), 1);
    }

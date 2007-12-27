@@ -323,12 +323,27 @@ Truncates file to C<-logmax>, if greater then.
 
 
 
+=item fread (file name) -> content
+
+Reads file and returns content as a string.
+
+
 
 =item fwrite (file name, string,...) -> success
 
 =item fwrite (>>file name, string,...) -> success
 
 Writes file or appends to it.
+
+
+
+=item hostdomain() -> DNS domain name
+
+=item hostname() -> full DNS host name
+
+=item hostnode() -> node name
+
+DNS domain, host, node name of this computer.
 
 
 
@@ -547,6 +562,12 @@ Used internally for transition from system scheduler.
 =head1 VERSION
 
 =over
+
+
+=item '2007-11-08'
+
+New C<fread>, C<hostdomain>, C<hostname>, C<hostnode> methods.
+
 
 =item '2007-08-13'
 

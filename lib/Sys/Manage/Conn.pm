@@ -21,7 +21,7 @@ use IO::Select;
 use Safe;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.57';
+$VERSION = '0.58';
 
 my $qlcl =0;	# quoting local args not needed because of shell quoting
 
@@ -1086,6 +1086,9 @@ sub fget {	# Get remote file
 	$s->{-agent}->read($fm, $fl);
 	return(!$s->getret() ||$s->{-erreval} ? undef : $fm)
  }
+ if((-f $fm) && (!-w $fm)) {
+	unlink($fm) ||return($s->error("fget: unlink '$fm': $!"));
+ }
  $fh =eval('use IO::File; 1') && IO::File->new($fm,'w')
 	|| return($s->error("fget: open '$fm': $!"));
  binmode($fh) if $o !~/b[0-]/;
@@ -1189,6 +1192,7 @@ sub fput {	# Put remote file
 	 ? '$fz =$fa; $fa=$t_ .".' .$ze .'";'
 	 : '')
 	.'if(-d $fa) {$m_->printflush($@="Err directory \'$fa\'\\n");die($@)};'
+	.'if((-f $fa) && (!-w $fa)) {unlink($fa) ||($m_->printflush($@="Err unlink \'$fa\': $!\\n") && die($@))};'
 	.'my $fh=IO::File->new($fa,\'w\');'
 	.'if (!$fh) {$m_->printflush($@="Err open \'$fa\': $!\\n");die($@)};'
 	.($o =~/b[0-]/ ? '' : 'binmode($fh);')

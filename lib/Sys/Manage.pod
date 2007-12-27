@@ -11,12 +11,26 @@ L<Sys::Manage::Conn|Sys/Manage/Conn> - Connection to remote Perl
 
 L<Sys::Manage::Schedule|Sys/Manage/Schedule> - Scriptic schedule trunk
 
+L<Sys::Manage::Desktops|Sys/Manage/Desktops> - Centralised management for desktop computers
+
 See particular modules.
 
 
 =head1 VERSION
 
 =over
+
+
+
+=item '2007-12-27'
+
+Publishing 0.58 version.
+
+New L<Sys::Manage::Desktops|Sys/Manage/Desktops> module.
+
+Corrections in L<Sys::Manage::Conn|Sys/Manage/Conn>.
+
+Extensions in L<Sys::Manage::Schedule|Sys/Manage/Schedule>.
 
 
 =item '2007-09-07'
@@ -181,7 +195,7 @@ This is free software;
 you can use redistribute it and/or modify it 
 under the same terms as Perl itself.
 
-A help in the revival of Pomor'e will be good.
+...a help in the revival of Pomor'e will be useful...
 
 =head1 AUTHOR
 

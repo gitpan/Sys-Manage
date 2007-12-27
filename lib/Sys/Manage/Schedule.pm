@@ -18,7 +18,7 @@ use strict;
 use Carp;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.57';
+$VERSION = '0.58';
 
 1;
 
@@ -159,6 +159,30 @@ sub strtime {		# Log time formatter
 }
 
 
+sub hostname {		# This host name
+ no warnings; 
+ eval('use Sys::Hostname(); Sys::Hostname::hostname')
+}
+
+
+sub hostnode {		# This host node name
+ $^O eq 'MSWin32'
+ ? Win32::NodeName()
+ : $_[0]->hostname(@_[1..$#_]) =~/^([^\.]+)/
+ ? $1
+ : $_[0]->hostname(@_[1..$#_])
+}
+
+
+sub hostdomain {	# This host domain
+ no warnings;
+ my $h =$_[0]->hostname(@_[1..$#_]);
+ $h =~/^[^\.]*\.(.+)$/
+	? $1
+	: eval('use Net::Domain(); Net::Domain::hostdomain')
+}
+
+
 sub qclad {		# Quote command line arg(s) on demand
 	map {	!defined($_) || ($_ eq '')
 		? '""'
@@ -239,14 +263,31 @@ sub copen {		# Command output open
 
 sub fwrite {		# File write
 			# (file name, strings)
-  my $fn =$_[1] =~/^[+<>]/ ? $_[1] : ('>' .$_[1]);
-  my $fh =$_[0]->fopen($fn);
-  my $r =$fh->print(map {/[\r\n]$/ ? $_ : "$_\n";
-		} @_[2..$#_]);
-  $fh->close();
-  $r;
+ my $fn =$_[1] =~/^[+<>]/ ? $_[1] : ('>' .$_[1]);
+ my $fh =$_[0]->fopen($fn);
+ my $r =$fh->print(map {/[\r\n]$/ ? $_ : "$_\n";
+	} @_[2..$#_]);
+ $fh->close();
+ $r;
 }
 
+
+
+sub fread {		# Load file
+ my $s =$_[0];		# (filename) -> content
+ my $f0=$_[1];
+ my $fn=$_[1] =~/^[+<>]/ ? $_[1] : ('<' .$_[1]);
+ my $fh =$_[0]->fopen($fn);
+ my $b =undef;
+ my $r =$fh->read($b,-s $f0);
+ eval{$fh->close()};
+ defined($r) ? $b : $s->echologdie("Error '$!' (fread,'$fn')")
+}
+
+
+sub fload {		# Load file
+	fread(@_)
+}
 
 
 sub ftruncate {		# File truncate

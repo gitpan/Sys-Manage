@@ -1021,6 +1021,11 @@ Saved STDOUT file handle.
 =over
 
 
+=item '2007-11-08'
+
+C<fput> and C<fget> corrected with attempt to delete unwriteable target file.
+
+
 =item '2007-08-31'
 
 Extended C<mget>, C<mput>.

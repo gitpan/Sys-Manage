@@ -25,4 +25,6 @@ lib/Sys/Manage/Conn.pm
 lib/Sys/Manage/Conn.pod
 lib/Sys/Manage/Schedule.pm
 lib/Sys/Manage/Schedule.pod
+lib/Sys/Manage/Desktops.pm
+lib/Sys/Manage/Desktops.pod
 META.yml                                 Module meta-data (added by MakeMaker)
