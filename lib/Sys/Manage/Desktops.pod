@@ -54,7 +54,7 @@ The C<Script> may provide assignments of commands to be executed once,
 C<-under> 'C<system>' or 'C<user>', within appropriate C<Run Modes>: C<startup>, C<logon>, C<runapp>, C<agent>.
 Assignments may be addressed to particular computers, users, groups.
 The assignments to be executed will be listed for user to agree.
-The assignments will be executed only when user agrees.
+The assignments will be executed only when user agrees (or C<-atoy>).
 The execution of assignment may interact with user.
 
 The recurrent and non-recurrent assignments are unified 
@@ -111,7 +111,7 @@ C<agent> uses 'at' Scheduler commands, may be activated via 'C<startup period>' 
 
 Periodical agent operation.
 C<system> assignments may be executed.
-C<user> assignments may be checked.
+C<user> assignments may be checked, if possible.
 
 This item is very platform dependent, see C<Limitations, Bugs, Problems>.
 
@@ -243,7 +243,7 @@ Assignments under C<Assignment Modes> are executed once during appropriate C<Run
 C<startup>, C<logon>, C<agent>, C<runapp>.
 
 System level assignments (C<-under> => 'C<system>') will be executed
-before user level assignments (C<-under> => 'C<user>').
+before user level assignments (C<-under> => 'C<user>') if possible (this is platform dependent).
 
 See also C<Description>, C<Run Modes>.
 
@@ -282,6 +282,15 @@ The most commonly used parameters are:
 C<-banner>, C<-support>, C<-mgrcall>, C<-dirmcf>,
 C<-dhu>, C<-dhn>,
 C<-dla>, C<-xnodes>, C<-xusers>
+
+
+=item -atoy
+
+	=> 30 # sec
+
+User assent timeout during C<startup> and C<logon>.
+User can agree immediate or agree will be implied past timeout.
+
 
 
 =item -banner
@@ -1101,6 +1110,13 @@ See also at the top of the source code.
 =head1 VERSION
 
 =over
+
+=item '2008-03-03'
+
+Publishing 0.59.
+
+Opening of upload directory added to prevent network connection lose on Windows.
+
 
 =item '2007-12-27'
 

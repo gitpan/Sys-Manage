@@ -18,7 +18,7 @@ use strict;
 use Carp;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.58';
+$VERSION = '0.59';
 
 1;
 

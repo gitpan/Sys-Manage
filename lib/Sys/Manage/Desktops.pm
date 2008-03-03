@@ -7,6 +7,9 @@
 #
 # ToDo, see also '???'
 # - testing
+# + -atoy=>30 due to NETLCK
+# + NETLCK preventing network lost
+# + startup -atoy=>10, 15 margin experimented, why?
 #
 
 package Sys::Manage::Desktops;
@@ -14,7 +17,8 @@ require 5.000;
 use strict;
 use Carp;
 
-use vars qw(@ISA @EXPORT @EXPORT_OK $SELF);
+use vars qw($VERSION @ISA @EXPORT @EXPORT_OK $SELF);
+$VERSION = '0.59';
 
 
 if ($^O eq 'MSWin32') {
@@ -102,6 +106,7 @@ sub initialize {	# Initialize newly created object
 	,-host		=>''			# host name of node
 	,-hostdom	=>''			# host DNS domain
 	,-asgid		=>''			# current assignment id
+	,-atoy		=>30			# answer timeout agree
 	#,-atow		=>0			# answer timeout wait
 	#,-atov		=>1			# answer timeout value
 	#,-yasg		=>undef			# auto yes asg, if possible
@@ -355,7 +360,7 @@ sub mesg {
 		? '; timeout=1'
 		: '; timeout=0'
 		,$s->{-atow} ? '; 9=pause) ' : ') ';
-	my $im =$s->{-atow} ? int($s->{-atow}/5) +1 : 1;
+	my $im =$s->{-atow} ? int($s->{-atow}/5) : 1;
 	for(my $i=0; $i <$im; $i++) {
 		if(defined($r =ReadKey($s->{-atow} ? 5 : 0))) {
 			$r =ReadKey(0)	if $r eq '9';
@@ -1841,6 +1846,7 @@ sub alRun {	# Assignments list run
 sub Run {	# Run module
  my($s,@arg) =@_;
  local $SELF =$s;
+ local $_;
  if ($s->{-runrole} && $arg[0]) {
 	return(0) if $arg[0]
 		&& (	  $s->{-runrole} =~/^(?:mngr|manager)$/i
@@ -1864,9 +1870,18 @@ sub Run {	# Run module
 	return($s->error("Run(): run mode required"));
  }
  $s->set(-runmode =>$arg[0]);
+
+ local *NETLCK;
+ (($s->{-runmode} =~/^(?:startup|shutdown)$/)
+	||($s->{-runmode} eq 'agent') && ($arg[1] eq 'apply'))
+ && ($_ =$s->{-dirmls} ||$s->{-dirmrs})
+ && (/^([\w:]*[\\\/]*[^\\\/]+[\\\/][^\\\/]+)/)
+ && opendir(NETLCK,$1);
+
  my $l;
  if ($s->{-runmode} eq 'startup') {
-	@$s{qw(-atow -atov)} =(60, 1);
+	@$s{qw(-atow -atov)} =($s->{-atoy}, 1);
+	local *DIRL; ($_ =$s->{-dirmrs} ||$s->{-dirmls}) && (/^([\w:]*[\\\/]*[^\\\/]+[\\\/][^\\\/]+)/) && opendir(DIRL,$1);
 	if ($arg[1]
 	&& ($^O eq 'MSWin32') && Win32::IsWinNT) {
 		splice @arg, 1, 0, 'agent', 'start'
@@ -1889,12 +1904,12 @@ sub Run {	# Run module
 	$s->alRun($l)	if @$l;
  }
  elsif ($s->{-runmode} eq 'shutdown') {
-	@$s{qw(-atow -atov)} =(60, 1);
+	@$s{qw(-atow -atov)} =($s->{-atoy}, 1);
 	$l =$s->dQuery($s->{-runmode}, 1);
 	$s->alRun($l)	if @$l;
  }
  elsif ($s->{-runmode} eq 'logon') {
-	@$s{qw(-atow -atov)} =(60, 1);
+	@$s{qw(-atow -atov)} =($s->{-atoy}, 1);
 	$s->banner();
 	$s->ulogon('w');
 	local $s->{-ymyn} =$s->{-yasg};
@@ -1985,13 +2000,15 @@ sub Run {	# Run module
 		foreach my $l (`at`) {
 			next if $l !~/\Q$q\E[\w\d\s]*[\r\n]*$/i;
 			next if $l !~/(\d+)/;
+			my $v =$1;
 			if (($l =~/\sapply[\s\r\n]*$/)
 			&& ($arg[1] eq 'loop')) {
 				$la =1;
-				next;
 			}
-			print "at $1 /d $l";
-			system("at $1 /d")
+			elsif ($v) {
+				print "at $v /d $l";
+				system("at $v /d")
+			}
 		}
 		return(1) if $arg[1] eq 'stop';
 	}

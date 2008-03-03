@@ -21,7 +21,7 @@ use IO::Select;
 use Safe;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.58';
+$VERSION = '0.59';
 
 my $qlcl =0;	# quoting local args not needed because of shell quoting
 
