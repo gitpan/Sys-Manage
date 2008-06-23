@@ -82,6 +82,7 @@ Sys::Manage::Cmd - Systems management command volley
 	fput, fget,		Sys::Manage::Conn
 	mput, mget		(!elem!, !user!, !pswd! substitutions not needed)
 	cmdfile		- evaluate command lines file or Perl script
+	cmdstat		- display current status using '-log'
 	!elem!, <	- target element and source file substitutions
 	!user!, !pswd!	- user name and password substitutions
 	!log!		- log filesystem name substitution
@@ -253,6 +254,8 @@ Consider L<Sys::Manage::Conn|Sys/Manage/Conn> commands in the source code:
 Consider 'C<cmdfile>' embedded command 
 to evaluate L<Sys::Manage::CmdFile|Sys/Manage/CmdFile> or Perl script file by this script.
 
+Consider 'C<cmdstat>' embedded command to display statistics.
+
 See also C<-cline>.
 
 
@@ -380,6 +383,7 @@ B<Special commands> (in C<-assoc> syntax):
 
 ['C<cmdfile>', command file, ? history file, ? redirect log file] - evaluate L<Sys::Manage::CmdFile|Sys/Manage/CmdFile> or Perl script file by this script.
 
+['C<cmdstat>'] - display current status.
 
 B<L<Sys::Manage::Conn|Sys/Manage/Conn> commands> (implemented via C<-assoc>):
 'rcmd' and 'lcmd', 
@@ -825,6 +829,13 @@ $ENV{SMUSER}	- target element user.
 =head1 VERSION
 
 =over
+
+=item '2008-06-05'
+
+Concurrent pids (C<-corder> eq 'c') logged into C<-log>.
+
+New C<cmdstat> embedded command using C<-log>.
+
 
 =item '2007-08-13'
 

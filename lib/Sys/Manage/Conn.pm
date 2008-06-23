@@ -21,7 +21,7 @@ use IO::Select;
 use Safe;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.59';
+$VERSION = '0.60';
 
 my $qlcl =0;	# quoting local args not needed because of shell quoting
 
@@ -406,10 +406,10 @@ sub agtsrc {		# Agent source
 	: '')
  .'while(defined($r_=$m_->getline)){$@=undef;$r_=eval $r_;'
  .($f ? "\n" : '')
+ .'$@=~s/[\\r\\n]/ /g;'
+ .($f ? "\n" : '')
  .'$m_->printflush("\\n'
- .do{my	$v =$s->{-mark};
-	$v =~s/([\$\@\\])/\\$1/g;
-	$v}
+ .'$k_' #.do{my $v =$s->{-mark}; $v =~s/([\$\@\\])/\\$1/g; $v}
  .'$?\\t$!\\t$^E\\t$@\\t$r_\\n")'
  .(!$f		? '}'
   : $f eq 's'	? '}'
@@ -713,16 +713,17 @@ sub reval0 {	# Remote Eval perl code without any additions
 	my $s =$_[0]; $s->{-asaw} =1;
 	my $agt =$s->{-asrc} && $s->{-asrc}->[1] ||
 	(''
+	#.'eval{$m_->binmode(1)};' # binmode always
 	.($s->{-title} ? 'print("' .$s->{-title} .'\\n");' : '')
 	.'print \'Connected \',$m_->sockport,\' \',join(\'.\',unpack(\'C4\',$m_->peeraddr)),\':\' ,$m_->peerport,"\\n";'
-	#.'eval{$m_->binmode(1)};' # binmode always
-	.'use Data::Dumper; $Data::Dumper::Indent=0;'
+	.'$k_ =\'' .do{my $v =$_[0]->{-mark}; $v =~s/(["'])/\\$1/g; $v} ."';"
 	.'$t_ =$ENV{TEMP}||$ENV{TMP}||"c:";'
 	.'$t_ .=($t_=~/([\\\\\/])/ ? $1 : $^O eq "MSWin32" ? "\\\\" : "/") ."' 
 	.$s->{-prgcn} .'-" .time() ."-" .$$;'
 	.'$ENV{SMELEM}="' .$s->{-node} .'";'
 	.'open(OLDOUT,\'>&STDOUT\');open(OLDERR,\'>&STDERR\');open(OLDIN,\'<&STDIN\');'
 	.'open(STDERR,\'>&\' .$m_->fileno);open(STDOUT,\'>&\' .$m_->fileno);'
+	.'use Data::Dumper; $Data::Dumper::Indent=0;'
 	.'$?=$!=$^E=0;'
 	.'1;'
 	);
@@ -1073,15 +1074,18 @@ sub fget {	# Get remote file
 	.'}';
  $s->reval0($cr)
 	|| return($s->error($@));
- my $fs =$s->getrow(); defined($fs) && chomp($fs);
-    $fs =!defined($fs)
-	? return($s->error('Connection stop'))
-	: ($fs =~/^([\d\t]+)$/) && $1
-	? [split /\t/, $1]
-	: $s->{-error} eq 'die'
-	? $s->error($fs)
-	: return(do{my $r =$s->error($fs); $s->getret(); $r});
- my $fl =$fs->[7];
+ my $fs =$s->getrow(); 
+ return($s->error('Connection stop'))
+	if !defined($fs);
+ chomp($fs);
+ $fs = ($fs =~/^([\d\t]+)$/) && $1 && [split /\t/, $1];
+ if (!$fs ||!ref($fs) ||!defined($fs->[7]) || ($fs->[7] eq '')) {
+	my $r =$s->error(!$fs ? 'fget: empty stat' : !ref($fs) ? $fs : 'fget: wrong stat');
+	return($r) if $s->{-error} eq 'die';
+	$s->getret();
+	return($r)
+ }
+ my $fl =$fs->[7] ||0;
  if (($o =~/s(?![0-])/) || !defined($fm)) {
 	$s->{-agent}->read($fm, $fl);
 	return(!$s->getret() ||$s->{-erreval} ? undef : $fm)

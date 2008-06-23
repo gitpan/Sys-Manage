@@ -7,6 +7,8 @@
 #
 # ToDo, see also '???'
 # - testing
+# + -hostdom for assignments text file
+# + errinfo() for NETLCK
 # + -atoy=>30 due to NETLCK
 # + NETLCK preventing network lost
 # + startup -atoy=>10, 15 margin experimented, why?
@@ -18,7 +20,7 @@ use strict;
 use Carp;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK $SELF);
-$VERSION = '0.59';
+$VERSION = '0.60';
 
 
 if ($^O eq 'MSWin32') {
@@ -66,6 +68,7 @@ sub initialize {	# Initialize newly created object
 						# winNT: (startup, ?(agent, start), period)
 	,-runrole	=>''			# manager | agent | query
 	,-errhndl	=>0			# err handler
+	,-errinfo	=>''			# err info
 	,-mgrcall	=>"perl $0"		# manager script call for clients
 	,-dirmcf	=>''			# dir of command files
 	,-dircrs	=>''			# dir of client regs: system
@@ -121,7 +124,8 @@ sub initialize {	# Initialize newly created object
  $s->{-support}	="Call support, if possible";
  $s->{-host}	=eval('{no warnings; use Sys::Hostname; Sys::Hostname::hostname}');
  $s->{-host}	=$s->{-host} !~/\./
-		? join('.', $s->{-host}, map {$_ ? ($_) : ()} eval('{no warnings; use Net::Domain; Net::Domain::hostdomain}'))
+		? join('.', $s->{-host}, map {$_ ? ($_) : ()
+			} (do{local $^W =0; eval('{no warnings; use Net::Domain; Net::Domain::hostdomain}')}))
 		: $s->{-host};
  $s->{-hostdom} =$s->{-host} =~/^[^\.]*\.(.+)$/ ? $1 : '';
  if ($^O eq 'MSWin32') {
@@ -227,6 +231,11 @@ sub erros {		# Format OS error message
 }
 
 
+sub errinfo {		# Error info add
+ $_[0]->{-errinfo} .=($_[0]->{-errinfo} ? ' // ' : '') .$_[1]
+}
+
+
 sub strtime {		# Log time formatter
 	my @t =$#_ >1 ? localtime(@_[1..$#_]) : $_[1] ? localtime($_[1]) : localtime();
 	 join('-', $t[5]+1900, map {length($_)<2 ? "0$_" : $_} $t[4]+1,$t[3]) 
@@ -271,6 +280,9 @@ sub error {		# Error final
     $e =(!$e ? '' : $e =~/[\r\n][ \t]*$/ ? $e : "$e ")
 	.'/* assignment=' .$s->{-asgid} ." */"
 	if $s->{-asgid};
+    $e =(!$e ? '' : $e =~/[\r\n][ \t]*$/ ? $e : "$e ")
+	.'/* errinfo=' .$s->{-errinfo} ." */"
+	if $s->{-errinfo};
  eval{STDOUT->flush()};
  $@ =$e;
  local $SIG{__DIE__} =$s->{-errhndl} && !ref($s->{-errhndl}) ? 'DEFAULT' : $SIG{__DIE__};
@@ -823,7 +835,7 @@ sub banner {		# Echo banner
  print "  user= ", join('; ', map {(defined($s->{$_}) ? $s->{$_} : 'undef')
 	} qw (-user -domain -dirmcf)), "\n";
  print '-' x $s->{-hrlen}, "\n"	if $s->{-hrlen};
- 1	
+ 1
 }
 
 
@@ -1106,6 +1118,7 @@ sub dQuery {		# Query assignments
 			? (undef, $q)
 			: ($q);
 	my ($id, $yq, $yn, $yu, $yc, $yt) =('');
+	my ($yd) =1;
 	my ($ha,$hr) =({},{});
 	my $l;
 	while (1) {
@@ -1118,6 +1131,11 @@ sub dQuery {		# Query assignments
 			last
 		}
 		elsif ($l =~/^[\s#]*[\r\n]/) {
+		}
+		elsif ($l =~/^(-hostdom|-domain)\s*[=>]+\s*['"]*([^\s\n\r'"]+)/) {
+			$yd =(lc($2) eq 'all') ||(lc($2) eq lc($s->{$1}))
+		}
+		elsif (!$yd) {
 		}
 		elsif ($l =~/^-dhn\b/) {
 			if ($n && ($l =~/^-dhn\s*[=>]+\s*[\['"]*$n\b/i)) {
@@ -1870,13 +1888,19 @@ sub Run {	# Run module
 	return($s->error("Run(): run mode required"));
  }
  $s->set(-runmode =>$arg[0]);
+ $s->errinfo(join('; ', map {defined($s->{$_}) ? ($_ .'=' .$s->{$_}) : ()
+	} qw(-mgrcall -host -node -hostdom -user -domain -dirmcf)));
 
  local *NETLCK;
- (($s->{-runmode} =~/^(?:startup|shutdown)$/)
+ if ( (($s->{-runmode} =~/^(?:startup|shutdown)$/)
 	||($s->{-runmode} eq 'agent') && ($arg[1] eq 'apply'))
  && ($_ =$s->{-dirmls} ||$s->{-dirmrs})
- && (/^([\w:]*[\\\/]*[^\\\/]+[\\\/][^\\\/]+)/)
- && opendir(NETLCK,$1);
+ && (/^([\w:]*[\\\/]*[^\\\/]+[\\\/][^\\\/]+)/)) {
+	$s->errinfo("NETLCK('$1'): "
+		.(opendir(NETLCK,$1)
+		? 'ok'
+		: $s->erros()))
+ }
 
  my $l;
  if ($s->{-runmode} eq 'startup') {

@@ -410,6 +410,9 @@ Assignments database may be a perl data structure (array ref) or a text file.
 Text database format:
 
 	# comment row
+	...
+	-hostdom=>'all' | 'domainName'		# domain for rows below
+	...
 	-dhn=>['node name','group name',...]	# node groups
 	...
 	-dhu=>['user name','group name',...]	# user groups
@@ -935,7 +938,7 @@ Example: w32ADSystemInfo->{DomainShortName}
 
 Windows 2000 DC.
 Path to 'scripts' subdirectory in 'netlogon' share if domain controller.
-See also ‘<w32srv>.
+See also C<w32srv>.
 
 
 =item w32olenew (progid, ?destructor) -> object | die
@@ -1037,7 +1040,8 @@ Should be placed inside 'Netlogon' share on domain controller.
 		||die('Cannot load Sys::Manage::Desktops');
 	my $s=Sys::Manage::Desktops->new(-errhndl=>1);
 
-	if (!$ENV{SMSERVER} && $ARGV[0]) {	# %SMSERVER% read
+	if (!$ENV{SMSERVER} 			# %SMSERVER% read
+	|| ($ARGV[0] && ($ARGV[0] =~/^(?:startup)/))) {
 		$s->fread("$spath\\SMServer.bat") =~/set\s*SMSERVER\s*=\s*([^\r\n\s]+)/
 		? $ENV{SMSERVER} =$1
 		: $s->error("Missing %SMSERVER%\n");
@@ -1110,6 +1114,11 @@ See also at the top of the source code.
 =head1 VERSION
 
 =over
+
+=item '2008-05-20'
+
+Added C<-hostdom> =>'all' | 'domainName' markup for C<-dla> text file.
+
 
 =item '2008-03-03'
 

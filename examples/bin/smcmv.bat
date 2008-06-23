@@ -41,7 +41,7 @@ perl -w -x -S %0 %*
 #
 # Predefined commands:
 #	see 'smrmt' script: 'rcmd', 'rdo', 'fput', 'fget', 'mput', 'mget' with options.
-#	see 'cmdfile'.
+#	see 'cmdfile', 'cmdstat'.
 #
 use Sys::Manage::Cmd;
 $s =Sys::Manage::Cmd->new(-cfg=>1);

@@ -21,6 +21,28 @@ See particular modules.
 =over
 
 
+=item '2008-06-23'
+
+Publishing 0.60 version.
+
+
+=item '2008-06-05'
+
+L<Sys::Manage::Cmd|Sys/Manage/Cmd>:
+Concurrent pids logged; new 'cmdstat' embedded command.
+
+
+=item '2008-05-20'
+
+L<Sys::Manage::Desktops|Sys/Manage/Desktops>:
+Added '-hostdom' markup for assignments text file.
+
+
+=item '2008-05-13'
+
+Corrections in L<Sys::Manage::Conn|Sys/Manage/Conn>.
+
+
 =item '2008-03-03'
 
 Publishing 0.59 version.

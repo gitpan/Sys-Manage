@@ -20,7 +20,7 @@ use POSIX qw(:sys_wait_h);
 use Data::Dumper;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.59';
+$VERSION = '0.60';
 
 1;
 
@@ -447,6 +447,36 @@ sub echolog {		# Echo log message
 }
 
 
+sub echologq {		# Echo log query PIDs
+ my $s =$_[0];
+ return(undef) if !$s->{-log};
+ $s->{-log} =$s->{-dirb} .$s->{-dirm} .'var' .$s->{-dirm} 
+	.$s->{-prgcn} .'-log.txt' 
+	if $s->{-log} =~/^\d+$/;
+ my $fh =IO::File->new('<' .$s->{-log})
+	|| return($s->error("cannot open '" .$s->{-log} ."': $!"));
+ my $qs =$^O eq 'MSWin32' ? (`tasklist 2>nul` || `tlist 2>nul` ||'') : `ps 2>nul`;
+ my (%pid, $row);
+ while (defined($row =readline($fh))) {
+	next if $row !~/\d\d\d\d-\d\d-\d\d\s/;
+	next if $row !~/\$\$(\d+)/;
+	my $id =$1;
+	if ($row =~/\s(?:Backlogs|CmdExit|CmdExcess|Error):\s/) {
+		delete $pid{$id};
+	}
+	elsif (!$pid{$id}) {
+		$pid{$id} =$row if $qs =~/\b\Q$id\E\b/;
+	}
+ }
+ if (%pid) {
+	print "\n\nCmdStat: Echo Log: unclosed PIDs\n\n";
+	foreach my $id (sort {$pid{$a} cmp $pid{$b}} keys %pid) {
+		print $pid{$id};
+	}
+ }
+}
+
+
 sub fstore {		# Store file
  my $s =shift;		# ('-b',filename, strings) -> success
  my $o =$_[0] =~/^-(?:\w[\w\d+-]*)*$/ ? shift : '-';
@@ -857,6 +887,8 @@ sub execute {		# Execute command (target action) with current options
     $s->{-cid} =$s->{-cerr} =undef;
     $s->checkbase();
  my $esc =$s->{-esc} ||1; # internal cmd line escaping: 0 - off, 1 - on
+ return $s->echologq()
+	if ref($_[1]) && (($_[1]->[0] ||'') eq 'cmdstat') && ($#{$_[1]} ==0);
  if (!$s->{-cbranch} && !$s->{-cpause}) {
 	$s->echo("Starting:\t"
 		, join(' '
@@ -1147,16 +1179,17 @@ sub execute {		# Execute command (target action) with current options
 	}
 
 					# logging command to object
-	$s->{-log} && $s->echolog("$fn = ",join(' ', $s->qclad(@$cme)));
 	$s->{-logevt} && &{$s->{-logevt}}($s, $fn, $cme, '');
 
 	if ($order =~/[s]/) {	# start types
+		$s->{-log} && $s->echolog("$fn = ",join(' ', $s->qclad(@$cme)));
 		eval{Sys::Manage::CmdEscort::CmdEscort([$fn, @$cme]
 		,-i=>$s->{-cignor}
 		,-v=>$s->{-echol} .($s->{-echo} =~/([t])/ ? $1 : '')); 1}
 		;#||warn("Error: Sys::Manage::CmdEscort::CmdEscort: $@\n");
 	}
 	if ($order =~/[b]/) {
+		$s->{-log} && $s->echolog("$fn = ",join(' ', $s->qclad(@$cme)));
 		eval{Sys::Manage::CmdEscort::CmdEscort([$fn, @$cme]
 		,-i=>$s->{-cignor}
 		,-v=>$s->{-echol} .($s->{-echo} =~/([t])/ ? $1 : '') .'c'); 1}
@@ -1164,7 +1197,7 @@ sub execute {		# Execute command (target action) with current options
 	}
 	elsif ($order =~/[c]/) {
 		$ENV{SMPID} =$$;
-		(system( 1	# [IPC::Open3] 1 == P_NOWAIT
+		my $pid =system( 1	# [IPC::Open3] 1 == P_NOWAIT
 			,$s->qclad($^X)
 			,'-e"use Sys::Manage::CmdEscort; CmdEscort([@ARGV]'
 				.($s->{-cignor} ? ',-i=>1' : '')
@@ -1173,8 +1206,9 @@ sub execute {		# Execute command (target action) with current options
 				.')"'
 			,$s->qclat($fn)
 			,$esc ? $s->qclae(@$cme) : $s->qclat(@$cme)
-			) ==-1)
-		&& return($s->error("system(CmdEscort) -> $!"));
+			);
+		$s->{-log} && $s->echolog("\$\$$pid, $fn = ",join(' ', $s->qclad(@$cme)));
+		return($s->error("system(CmdEscort) -> $!")) if $pid ==-1;
 	}
  }
 
