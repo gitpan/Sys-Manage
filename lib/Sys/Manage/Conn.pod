@@ -1020,6 +1020,11 @@ Saved STDOUT file handle.
 
 =over
 
+=item '2008-08-25'
+
+OS error info extended.
+
+
 =item '2008-05-13'
 
 Transfer of $@ corrected removing [\r\n] on agent.

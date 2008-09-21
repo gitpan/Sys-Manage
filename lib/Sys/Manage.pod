@@ -20,6 +20,12 @@ See particular modules.
 
 =over
 
+=item '2008-09-21'
+
+Publishing 0.61 version, 
+L<Sys::Manage::Desktops|Sys/Manage/Desktops> extended,
+L<Sys::Manage::Conn|Sys/Manage/Conn> corrected.
+
 
 =item '2008-06-23'
 
@@ -223,7 +229,9 @@ This is free software;
 you can use redistribute it and/or modify it 
 under the same terms as Perl itself.
 
-...a help in the revival of Pomor'e will be useful: L<http://www.pomor-rus.org>...
+...a help in the revival of Pomor'e will be useful: 
+L<http://www.pomor-rus.org>,
+L<http://pomorland.narod.ru>...
 
 =head1 AUTHOR
 

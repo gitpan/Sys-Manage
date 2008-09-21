@@ -20,7 +20,7 @@ use POSIX qw(:sys_wait_h);
 use Data::Dumper;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.60';
+$VERSION = '0.61';
 
 1;
 

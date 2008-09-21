@@ -7,6 +7,7 @@
 #
 # ToDo, see also '???'
 # - testing
+# - timeout of scripts (startup, logon) should be considered
 # + -hostdom for assignments text file
 # + errinfo() for NETLCK
 # + -atoy=>30 due to NETLCK
@@ -20,7 +21,7 @@ use strict;
 use Carp;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK $SELF);
-$VERSION = '0.60';
+$VERSION = '0.61';
 
 
 if ($^O eq 'MSWin32') {
@@ -115,9 +116,12 @@ sub initialize {	# Initialize newly created object
 	#,-yasg		=>undef			# auto yes asg, if possible
 	#,-yerr		=>undef			# auto ack err
 	#,-ymyn		=>undef			# auto yes for mesg('yn')
+	#,-w32ugrps	=>undef			# win32ugrps() cached
 	#,-w32dcf	=>undef			# win32 DC netlogon filesystem
 	#,-w32srv
 	#,-w32prodtype
+	#,-w32nuse
+	#,-w32umnu
 	, %$s
 	);
  $s->{-banner}	="Centralised management for desktop computers";
@@ -131,8 +135,10 @@ sub initialize {	# Initialize newly created object
  if ($^O eq 'MSWin32') {
 	$s->{-node}	=Win32::NodeName();
 	$s->{-mgrcall}	='perl '
-			.'%LOGONSERVER%\\NetLogon\\'
-			.($0 =~/\\\/([^\\\/]+)$/ ? $1 : $0);
+			.(do{	my $p =eval{Win32::GetFullPathName($0)} ||$0;
+				$p =~s/^\\\\[^\\\/]+\\NetLogon\\/'\\\\' .$s->{-hostdom} .'\\NetLogon\\'/ie
+					if $s->{-hostdom};
+				$p});
 	if ($s->w32dcf()) {
 		$s->{-dirmcf} =$s->w32dcf()  .'\\' .$s->{-prgcn} .'-mcf';
 	}
@@ -283,10 +289,10 @@ sub error {		# Error final
     $e =(!$e ? '' : $e =~/[\r\n][ \t]*$/ ? $e : "$e ")
 	.'/* errinfo=' .$s->{-errinfo} ." */"
 	if $s->{-errinfo};
- eval{STDOUT->flush()};
  $@ =$e;
  local $SIG{__DIE__} =$s->{-errhndl} && !ref($s->{-errhndl}) ? 'DEFAULT' : $SIG{__DIE__};
  if ($s->{-runmode} && ($s->{-runmode} =~/^(?:startup|logon|runapp|apply)$/)) {
+	local $|=1;
 	$s->mesg('err'
 		,$s->{-lang} eq 'ru' ? 'Žè¨¡ª ' : 'Error'
 		,!$s->{-support}
@@ -294,7 +300,10 @@ sub error {		# Error final
 		: !ref($s->{-support}) eq 'CODE'
 		? &{$s->{-support}}($s,$e)
 		: $s->{-support}
-		, $e)
+		, $e);
+ }
+ else {
+	local $|=1; print "\n";	# eval{STDOUT->flush()}
  }
  croak("Error: $e\n");
  return(undef);
@@ -304,6 +313,9 @@ sub error {		# Error final
 sub errhndl {		# Error handler
  my $s =$SELF;
  return if $^S || !$s;
+ return if $_[0] 	# bug in Perl 5.6
+	&& ($_[0] =~/\sSetDualVar\.pm\s/) 
+	&& ($_[0] =~/\/Win32\/TieRegistry\.pm[\s]/);
  my $e =join('',@_);
     $e =(!$e ? '' : $e =~/[\r\n][ \t]*$/ ? $e : "$e ")
 	.'/* assignment=' .$s->{-asgid} ." */"
@@ -451,7 +463,7 @@ sub fstore {
 
 sub fread {		# Load file
  my $s =shift;		# ('-b',filename) -> content
- my $o =$_[0] =~/^-$/ ? shift : '-';
+ my $o =$_[0] =~/^-/ ? shift : '-';
  my($f,$f0) =($_[0],$_[0]); 
 	if ($f =~/^[<>]+/)	{$f0 =$'}
 	else			{$f  ='<' .$f}
@@ -510,11 +522,39 @@ sub fglob {	# Glob directory
 }
 
 
+sub ffind {	# File find
+		# (?-opt, path, sub(self, full, path, $_=entry){}, post sub{})
+		# 'i'gnore errors, 'r'ecurse
+ my ($s, $o, $p, $c, $c1) =$_[1] =~/^-/ ? (@_) : ($_[0], '-r', $_[1..$#_]);
+ my $l =$p =~/([\\\/])/ ? $1 : $s->{-dirm};
+ local (*DIR, $_);
+ opendir(DIR, $p eq '' ? '.' .$p : $p) 
+	|| return($o =~/i/ ? 0 : ($s && $s->error("ffind(" .$p ."): opendir('$p') -> " .$s->erros)));
+ while(defined($_ =readdir(DIR))) {
+	next if $_ eq '.' || $_ eq '..';
+	my $e =$p .$l .$_;
+	if ((-d $e) && ($o =~/[r]/)) {
+		&$c($s,$e,$p,$_)	if $c;
+		$s->ffind($o, $e, $c, $c1);
+		&$c1($s,$e,$p,$_)	if $c1;
+	}
+	else {
+		&$c($s,$e,$p,$_)	if $c;
+		&$c1($s,$e,$p,$_)	if $c1;
+	}
+ }
+ closedir(DIR)
+	|| return($o =~/i/ ? 0 : ($s && $s->error("ffind(" .$p ."): closedir('$p') -> " .$s->erros)));
+ 1
+}
+
+
 sub fpthmk {    # Create directory if needed
  return(1) if -d $_[1];
  my $a ='';
- foreach my $e (split /\//, $_[1]) {
+ foreach my $e (split /[\\\/]/, $_[1]) {
 	$a .=$e;
+	next if !$a;
 	if (!-d $a) {
 		mkdir($a, 0777) ||return($_[0]->error("fpthmk('$a'): " .$_[0]->erros($a)));
 	}
@@ -527,44 +567,54 @@ sub fpthmk {    # Create directory if needed
 sub fcopy {	# Copy files
 		# (?-opt, source, target, cnd sub(self, src, tgt){})
 		# file, file; file, base; dir*, dir; dir, base
+		# opts: 's'tat, 'r'ecurse, 'i'gnore errs
  my $s =shift;
- my $o =$_[0] =~/^-/ ? shift : '-';
+ my $o =$_[0] =~/^-/ ? shift : '-r';
  my ($s0, $t0, $c) =@_;
  local $_;
  if (-f $s0) {
+	my $st =$o =~/s/ ? int((stat(_))[9]/2) : 0;
 	my $t1 =!-d $t0
 		? $t0
 		: $s0 =~/([\\\/][^\\\/]+)$/
 		? ($t0 .$1)
 		: ($t0 . $s->{-dirm} .$s0);
 	return(0)	if $c && !&$c($s, $_ =$s0, $t1);
+	if ($o =~/s/) {
+		my $tt = int(((stat($t1))[9]||0)/2);
+		return(0) if $st <= $tt;
+	}
+	$s->echo('fcopy', ' ', $s0, ' ', $t1) if $o =~/v/;
 	unlink($t1) if (-e $t1);
 	($^O eq 'MSWin32'
 	? Win32::CopyFile($s0, $t1, 1)
 	: (eval('use File::Copy (); 1') && File::Copy::syscopy($s0, $t1)))
-	|| $s->error("fcopy($s0, $t1): " .$s->erros($t1))
+	|| ($o =~/i/ ? 0 : $s->error("fcopy($s0, $t1): " .$s->erros($t1)))
  }
  else {
 	my ($p, $m);
 	if (-d $s0) {
 		($p, $m) =($s0, '*');
-		$t0 =$s0 =~/([\\\/][^\\\/]+)$/
-			? ($t0 .$1)
-			: ($t0 .$s->{-dirm} .$s0);
+		$s->fpthmk($t0);
+		$t0 =$s0 =~/([\\\/][^\\\/]+)$/ ? ($t0 .$1) : ($t0 .$s->{-dirm} .$s0);
 		$s->fpthmk($t0);
 	}
 	elsif (($s0 =~/([^\\\/]+)$/) && ($1 =~/[\?\*]/)) {
 		($p, $m) =$s0 =~/^(.*?)[\\\/]([^\\\/]+)$/
 			? ($1, $2)
 			: ('.', $s0);
+		$s->fpthmk($t0);
 	}
 	else {
 		($p, $m) =($s0, '*');
+		$s->fpthmk($t0);
 	}
-	return($s->error("fcopy($o, $s0, $t0) -> source dir not found\n"))
+	return($o =~/i/ ? 0 : $s->error("fcopy($o, $s0, $t0) -> source dir not found\n"))
 		if !-d $p;
+	my $r =0;
 	foreach my $e ($s->fglob($p .$s->{-dirm} .$m)) {
 		if (-d $e) {
+			next if $o !~/r/;
 			my $t1 =$e =~/([\\\/][^\\\/]+)$/
 				? $t0 .$1
 				: $e =~/([^\\\/]+)$/
@@ -572,14 +622,51 @@ sub fcopy {	# Copy files
 				: $t0;
 			next	if $c && !&$c($s, $_ =$e, $t1);
 			$s->fpthmk($t1);
-			$s->fcopy($o, $e .$s->{-dirm} .$m, $t1, $c);
+			$r++ if $s->fcopy($o, $e .$s->{-dirm} .$m, $t1, $c);
 		}
 		else {
-			$s->fcopy($o, $e, $t0, $c)
+			$r++ if $s->fcopy($o, $e, $t0, $c)
 		}
 	}
-	1
+	$r
  }
+}
+
+
+sub frun {	# Run file / command
+		# (?-opt, command, args,...)
+		# (?-opt, 'do', file, args,...)
+		# opts: 'v'erbose, 'i'gnore errs, 'e'xit code test
+ my $s =shift;
+ my $o =$_[0] =~/^-/ ? shift : '-';
+ my $r =0;
+ if ($_[0] eq 'do') {
+	{local $|=1; $s->echo(join(' ',@_)) if $o =~/v/;}
+	local @ARGV = $#_ >1 ? @_[2..$#_] : @ARGV;
+	local $SELF = $s;
+	local $_ =$s;
+	my $x ='{package ' .scalar(caller()) ."; do '"
+		.(do{my $v =$_[1]; $v =~s/\\/\\\\/g; $v =~s/'/\\'/g; $v})
+		."'}";
+	$r =eval $x;
+	if (!defined($r) && $@) {
+		return($s->error($x,' -> ',$@)) if $o !~/i/;
+	}
+	return($o =~/e/ ? $r : 1);
+ }
+ else {
+	$s->echo(join(' ',@_)) if $o =~/v/;
+	$r =system(@_);
+	if ($r <0) {
+		return($o =~/i/	? 0 : $s->error(join(' ',@_) .' -> ' .$s->erros));
+	}
+	else {
+		return(1) if $o !~/e/;
+		$r =($? >> 8);
+		return(!$r ? 1 : $o =~/i/ ? 0 : $s->error(join(' ',@_) .' -> ' .$r));
+	}
+ }
+ $r
 }
 
 
@@ -738,8 +825,11 @@ sub w32wmiqf {	# Win32 WMI ExecQuery Fetch
 
 
 sub w32registry {	# Win32 Registry
- eval('{local $SIG{__DIE__}="DEFAULT"; use Win32::TieRegistry; 1}')
-	||return($_[0] && $_[0]->error('Win32::TieRegistry -> ' .($@ ? $@ : 'unknown error')))
+ my $r;
+ {	local $SIG{__DIE__}="DEFAULT";
+	$r =eval("use Win32::TieRegistry; 1");
+ }
+ $r || return($_[0] && $_[0]->error('Win32::TieRegistry -> ' .($@ ? $@ : 'unknown error')))
 	if !$INC{'Win32/TieRegistry.pm'};
  $_[1] ? $Win32::TieRegistry::Registry->{$_[1]} : $Win32::TieRegistry::Registry
 }
@@ -819,21 +909,159 @@ sub w32regenu {		# Win32 Registry enumeration of users
 }
 
 
+sub w32nuse {		# Win32 'net use' commands
+			# () -> 'net use' text
+			# (drive) -> path used
+			# (drive, path) -> drive used
+ my ($s, $o, $d, $p, @a) =defined($_[1]) && ($_[1] =~/^-/) ? (@_) : ($_[0], '-iv', @_[1..$#_]);
+ $s->{-w32nuse} =`net use`	if !$s->{-w32nuse};
+ return($s->{-w32nuse})	if !$d;
+ chop($d)	if substr($d,-1) eq ':';
+ return($s->{-w32nuse} =~/\s\Q${d}:\E\s*([^\s]*)/i ? ($1 || $d) : (0))
+		if !$p;
+ return($d)
+		if $s->{-w32nuse} =~/\s\Q${d}:\E\s+\Q${p}\E/i;
+ my $r;
+ if ($p =~/^\/d/i) {
+	$r =$s->frun($o, 'net', 'use', $d .':', '/delete', @a);
+ }
+ elsif (Win32::IsWin95()) {
+	$r =$s->frun($o, 'net', 'use', $d .':', $p, @a, '/Yes');
+ }
+ elsif (Win32::IsWinNT() && ($o !~/v/)) {
+	$s->echo(join(' ','net','use',$d,$p,@a)) if $o =~/v/;
+	my $v =($s->{-w32nuse} =~/\s\Q${d}:\E\s*/i 
+		? "net use ${d}: /delete & net use ${d}: $p 2>&1" 
+		: "net use ${d}: $p 2>&1");
+	$v =`$v`;
+	$r =$?>>8;
+	return($s->error(join(' ','net','use',$d,$p,@a,'->','$?' .$r,$v)))
+		if $r && ($o !~/i/);
+	$r =!$r;
+ }
+ elsif (Win32::IsWinNT() && ($o =~/v/)) {
+	$r =$s->frun($o, 'net', 'use', $d .':', '/delete')
+		if $s->{-w32nuse} =~/\s\Q${d}:\E\s*/i;
+	$r =$s->frun($o, 'net', 'use', $d .':', $p, @a);
+ }
+ else {
+	`net use $d /delete`;
+	$r =$s->frun($o, 'net', 'use', $d .':', $p, @a);
+ }
+ $r && $d
+}
+
+
+sub w32umnu {		# Win32 User Menu Item policy
+			# (place opt m|p|d, item file name, item parameters)
+			# (opt, clean filter sub{}(ffind sub{}))
+			# start 'm'enu, 'p'rograms, 'd'esktop, 'i'gnore, 'v'erbose
+			# $s->{-w32umnu} may be base path to menu item dirs.
+ my ($s, $p, $f, %o) =@_;
+ local $_;
+ if (!$s->{-w32umnuM}) {
+	my $r =$s->w32registry('CUser\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders');
+	$s->{-w32umnuM} =$r->{'Start Menu'};
+	$s->{-w32umnuP}	=$r->{'Programs'};
+	$s->{-w32umnuD}	=$r->{'Desktop'};
+	eval('use Win32::Shortcut');
+ }
+ $s->{-w32umnuH} ={}	if !$s->{-w32umnuH};
+ if (ref($f) eq 'CODE') {	# clean
+	my $sch =sub{	if ($s->{-w32umnuH}->{lc($_[1])}) {
+			}
+			elsif (&$f(@_)) { # $_ =~/(?:\[NFD\]|\(NFD\))[.\w]*$/
+				$s->echo(join(' ','unlink',$_[1])) if $p =~/v/;
+				-d $_[1] ? rmdir($_[1]) : unlink($_[1])
+			}};
+	foreach my $m (qw(-w32umnuM -w32umnuP -w32umnuD)) {
+		$s->ffind('-ri', $s->{$m}, undef, $sch);
+	}
+ 	return(1)
+ }
+ return(undef)		if !$p ||!$f;
+ foreach my $k (keys %o) {
+	my $m =( $k =~/path|targ/i	? 'Path'
+		:$k =~/arg/i		? 'Arguments'
+		:$k =~/work|dir/i	? 'WorkingDirectory'
+		:$k =~/desc|dsc/i	? 'Description'
+		:$k =~/show/i		? 'ShowCmd'
+		:$k =~/hot/i		? 'Hotkey'
+		:$k =~/i.*l/i		? 'IconLocation'
+		:$k =~/i.*n/i		? 'IconNumber'
+		:$k);
+	next if $m eq $k;
+	$o{$m} =$o{$k};
+	delete  $o{$k};
+ }
+ foreach my $l (qw(M P D)) {
+	next if $p !~/$l/i;
+	if (!%o) {
+		my $d =($s->{-w32umnu} ||'') .$s->{-dirm} .$f;
+		$d .='.NT' if ($p =~/o/) && Win32::IsWinNT() && (-d "${d}.NT");
+		$s->ffind('-r' .$p, $d
+			, sub{	my $ff =$_[0]->{'-w32umnu' .$l} 
+				#	.$_[0]->{-dirm}
+					.substr($_[1],length($d));
+				if (-d $_[1]) {
+					$_[0]->{-w32umnuH}->{lc($ff)} =1;
+					$_[0]->fpthmk($ff);
+				}
+				elsif (($ff =~/\.pif$/i) && Win32::IsWinNT()) {
+					$_[0]->{-w32umnuH}->{lc($ff)} =1;
+					$ff =~s/\.pif$/\.lnk/i;
+					$_[0]->fcopy('-s' .$p, $_[1], $ff);
+					# my $me =Win32::Shortcut->new($ff);
+					# $me->Save($ff);
+					$_[0]->{-w32umnuH}->{lc($ff)} =1;
+				}
+				else {
+					$_[0]->fcopy('-s' .$p, $_[1], $ff);
+					$_[0]->{-w32umnuH}->{lc($ff)} =1;
+				}});
+		next
+	}
+	my $ff =$s->{'-w32umnu' .$l} .$s->{-dirm} .$f
+		.( $f !~/\.(?:lnk|pif)$/i ? '.lnk' : '');
+	$ff =~s/\.pif$/\.lnk/i if Win32::IsWinNT();
+	if (!$s->{-w32umnuH}->{lc($ff)}) {
+		my $d =($ff =~/^(.+?)[\\\/][^\\\/]+$/ ? $1 : '');
+		$s->fpthmk($d) if $d;
+	}
+	my $me =Win32::Shortcut->new($ff);
+	my $mw =0;
+	foreach my $k (keys %o) {
+		$mw =1 if (defined($me->{$k}) ? $me->{$k} : '') ne (defined($o{$k}) ? $o{$k} : '');
+		$me->{$k} =$o{$k};
+	}
+	$s->echo(join(' ','Win32::Shortcut', $p, $ff)) if ($p =~/v/) && $mw;
+	$me->Save($ff) if $mw;
+	$s->{-w32umnuH}->{lc($ff)} =1;
+ }
+ 1
+}
+
+
+
+
 sub banner {		# Echo banner
- my ($s) =@_;
+ my ($s, @b) =@_;	# (?text)
+ local $|=1;
  if (ref($s->{-banner}) eq 'CODE') {
 	&{$s->{-banner}}($s);
  }
- elsif ($s->{-banner}) {
+ elsif (scalar(@b) || $s->{-banner}) {
 	print "\n", '-' x $s->{-hrlen}, "\n" if $s->{-hrlen};
-	print $s->{-banner},"\n";
+	print scalar(@b) ? @b : $s->{-banner},"\n";
  }
+ if (!scalar(@b)) {
  print "  mngr= ", join('; ', map {(defined($s->{$_}) ? $s->{$_} : 'undef')
 	} qw (-mgrcall)), "\n";
  print "  host= ", join('; ', map {(defined($s->{$_}) ? $s->{$_} : 'undef')
 	} qw (-host -node -hostdom)), "\n";
  print "  user= ", join('; ', map {(defined($s->{$_}) ? $s->{$_} : 'undef')
 	} qw (-user -domain -dirmcf)), "\n";
+ }
  print '-' x $s->{-hrlen}, "\n"	if $s->{-hrlen};
  1
 }
@@ -909,6 +1137,15 @@ sub unames {		# Names of user
 	$r =$s->{-dhu}->{$u} ||$s->{-dhu}->{lc($u)};
 	$r =$s->{-dhu}->{$1} ||$s->{-dhu}->{lc($1)}
 		if !$r && ($u =~/[\\\/](.+)$/);
+	# $r =$s->{-dhu}->{lc($u)} =[$s->w32ugrps($u)]
+	#	if !$r && ($^O eq 'MSWin32') && Win32::IsWinNT();
+	$r =[]	if !$r;
+ }
+ elsif (($^O eq 'MSWin32') && Win32::IsWinNT()) {
+	$s->{-w32ugrps} ={}	if !$s->{-w32ugrps};
+	if (!($r =$s->{-w32ugrps}->{lc($u)})) {
+		$r =$s->{-w32ugrps}->{lc($u)} =[$s->w32ugrps($u)];
+	}
  }
  [$u
 	, $u =~/[\\\/](.+)$/
@@ -938,6 +1175,15 @@ sub nnames {		# Names of node
 	$r =$s->{-dhn}->{$u} ||$s->{-dhn}->{lc($u)};
 	$r =$s->{-dhn}->{$1} ||$s->{-dhn}->{lc($1)}
 		if !$r && ($u =~/[\\\/](.+)$/);
+	# $r =$s->{-dhn}->{lc($u)} =[$s->w32ugrps($u .'$')]
+	#	if !$r && ($^O eq 'MSWin32') && Win32::IsWinNT();
+	$r =[] if !$r;
+ }
+ elsif (($^O eq 'MSWin32') && Win32::IsWinNT()) {
+	$s->{-w32ugrps} ={}	if !$s->{-w32ugrps};
+	if (!($r =$s->{-w32ugrps}->{lc($u .'$')})) {
+		$r =$s->{-w32ugrps}->{lc($u .'$')} =[$s->w32ugrps($u .'$')];
+	}
  }
  [$u
 	, $u =~/[\\\/](.+)$/
@@ -1858,6 +2104,19 @@ sub alRun {	# Assignments list run
 		if $v && ($^O eq 'MSWin32') && Win32::IsWinNT;
  }
  1;
+}
+
+
+sub runmngr {	# Run as manager?
+ (!$_[1]
+ || (($_[1] =~/^(?:query|refresh)$/i) 
+	|| ($_[2] && ($_[2] eq 'say') && ($_[1] eq 'agent'))))
+ && getlogin()
+}
+
+
+sub runuser {	# Run as user?
+ $_[1] && ($_[1] =~/^(?:logon|logoff|runapp)$/i) && getlogin()
 }
 
 

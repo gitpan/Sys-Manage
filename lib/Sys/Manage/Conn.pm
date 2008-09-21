@@ -21,7 +21,7 @@ use IO::Select;
 use Safe;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.60';
+$VERSION = '0.61';
 
 my $qlcl =0;	# quoting local args not needed because of shell quoting
 
@@ -279,6 +279,10 @@ sub error {		# Error final
 }
 
 
+sub erros {
+ ($! +0) .'. ' .$! .($^E ? ' (' .($^E +0) .'. ' .$^E .')' : '')
+}
+
 
 sub echo {		# Echo printout
  my $s =shift;		# (item, others)
@@ -440,7 +444,7 @@ sub agtfile {		# Agent source write
 			, 0, &DETACHED_PROCESS, '.')
 	: system(1, $s->qclad($^X, $f, @_)) !=-1
 	)
-	|| return($s->error('agtfile:',"cannot start '$f': $!"));
+	|| return($s->error('agtfile:',"cannot start '$f':", erros()));
  }
  $r
 }
@@ -635,7 +639,7 @@ sub connect {		# Connect agent node
 			, join(' ', @c)
 			, ') (', length($agt), ' bytes)'
 			, "...\n") if $s->{-echo} >2;
-	(system(@c) ==-1) && return($s->error('rsh:',$!));
+	(system(@c) ==-1) && return($s->error('rsh:',erros()));
 	($?>>8) && return($s->error('rsh:',($?>>8)))
  }
  elsif ($s->{-init} eq 'telnet') {	# using telnet
@@ -889,7 +893,7 @@ sub lcmd {	# Local OS command
 		waitpid($pid,0);
 	}
 	else {
-		return($s->error('lcmd:',$!))
+		return($s->error('lcmd:',erros()))
 	}
  }
  else {
@@ -901,7 +905,7 @@ sub lcmd {	# Local OS command
 				}
 				qclad($s, $v)}
 			: $_ } @_) ==-1)
-		&& return($s->error('lcmd:',$!))
+		&& return($s->error('lcmd:',erros()))
 
  }
  !($?>>8)
@@ -1091,19 +1095,20 @@ sub fget {	# Get remote file
 	return(!$s->getret() ||$s->{-erreval} ? undef : $fm)
  }
  if((-f $fm) && (!-w $fm)) {
-	unlink($fm) ||return($s->error("fget: unlink '$fm': $!"));
+	unlink($fm) ||return($s->error("fget: unlink '$fm':",erros()));
  }
  $fh =eval('use IO::File; 1') && IO::File->new($fm,'w')
-	|| return($s->error("fget: open '$fm': $!"));
+	|| return($s->error("fget: open '$fm':",erros()));
  binmode($fh) if $o !~/b[0-]/;
  $s->echo('fget', qclad($s,$fm), " ($fl/$op)") if $s->{-progress} && $s->{-echo};
  my $fb; my $fc=0; my $ft;
  while ($fc <$fl) {
 	$ft =$fc+$op <= $fl ? $op : $fl-$fc;
 	# $s->{-select}->can_read(10);
-	return($s->error('fget: accept:', $!))
-		if !defined($s->{-agent}->read($fb, $ft))
-		|| !defined($fh->syswrite($fb, $ft));
+	return($s->error('fget: read:', erros()))
+		if !defined($s->{-agent}->read($fb, $ft));
+	return($s->error('fget: syswrite:', erros()))
+		if !defined($fh->syswrite($fb, $ft));
 	$fc +=$ft;
 	print '.' if $s->{-progress} && $s->{-echo};
  }
@@ -1177,7 +1182,7 @@ sub fput {	# Put remote file
 	return($s->error("fput: not readable '$fm'"))
 		if !$fs || (!-f $fm) ||(!-r $fm);
 	$fh =eval('use IO::File; 1') && IO::File->new($fm,'r')
-		|| return($s->error("fput: open '$fm': $!"));
+		|| return($s->error("fput: open '$fm':",erros()));
  }
  my $t0 =time();
  my $cr ='{open(STDOUT,\'>&OLDOUT\');'
@@ -1242,9 +1247,10 @@ sub fput {	# Put remote file
  while ($fc <$fl) {
 	$ft =$fc+$op <= $fl ? $op : $fl-$fc;
 	# $s->{-select}->can_read(10);
-	return($s->error('fput: transfer:', $!))
-		if !defined($fh->sysread($fb, $ft))
-		|| !defined($s->{-agent}->syswrite($fb, $ft));
+	return($s->error('fput: sysread:', erros()))
+		if !defined($fh->sysread($fb, $ft));
+	return($s->error('fput: syswrite:', erros()))
+		if !defined($s->{-agent}->syswrite($fb, $ft));
 	$fc +=$ft;
 	print '.' if $s->{-progress} && $s->{-echo};
  }
@@ -1257,7 +1263,7 @@ sub fput {	# Put remote file
  }
  elsif ($s->getret($fe)) {
 	 ($o =~/m(?![0-])/) || $fu
-	? unlink($fm) || return($s->error("unlink '$fm': $!"))
+	? unlink($fm) || return($s->error("unlink '$fm':",erros()))
 	: undef;
 	if (ref($fs) && $fs->[7]) {
 		$t0 =time() -$t0;
@@ -1298,7 +1304,7 @@ sub lfwrite {	# Write local file
  $s->echo('lfwrite', qclad($s,$o), ' ', qclad($s,$f),"\n") if $s->{-echo};
  $s->{-retexc} =undef;
  $s->reject($s,'lfwrite',$o,@_) && return($s->errject());
- local *FILE;  open(FILE, $f) || return($s->error("lfwrite: cannot open '$f': $!"));
+ local *FILE;  open(FILE, $f) || return($s->error("lfwrite: cannot open '$f':",erros()));
  my $r =undef;
  if ($o !~/b[0-]/) {
 	binmode(FILE);
@@ -1308,7 +1314,7 @@ sub lfwrite {	# Write local file
 	$r =print FILE join("\n",@_[1..$#_])
  }
  close(FILE);
- $r || $s->error("lfwrite: cannot write '$f': $!")
+ $r || $s->error("lfwrite: cannot write '$f':",erros())
 }
 
 
@@ -1332,12 +1338,12 @@ sub lfread {	# Read local file
  $s->echo('lfread', qclad($s,$o), ' ', qclad($s,$f),"\n") if $s->{-echo};
  $s->{-retexc} =undef;
  $s->reject($s,'lfread',$o,@_) && return($s->errject());
- local *FILE;  open(FILE, $f) || return($s->error("lfread: cannot open '$f': $!"));
+ local *FILE;  open(FILE, $f) || return($s->error("lfread: cannot open '$f':",erros()));
  my $b =undef;
  binmode(FILE) if $o !~/b[0-]/;
  my $r =read(FILE,$b,-s $f0);
  close(FILE);
- defined($r) ? $b : $s->error("lfread: cannot read '$f': $!")
+ defined($r) ? $b : $s->error("lfread: cannot read '$f':",erros())
 }
 
 
@@ -1709,10 +1715,10 @@ sub mfpg {	# Put/Get newer multiple files
 	local $s->{-reject}=undef;
 	$sh =($m eq 'mput'	? $s->lls($o,$sq,$fq,'stat $_',{}) 
 				: $s->rls($o,$sq,$fq,'stat $_',{}))
-		||return($s->error("${m}: cannot list $sq: $!"));
+		||return($s->error("${m}: cannot list $sq:",erros()));
 	$th =($m eq 'mput'	? $s->rls($o,$tq,$fq,'stat $_',{}) 
 				: $s->lls($o,$tq,$fq,'stat $_',{}))
-		||return($s->error("${m}: cannot list $tq: $!"));
+		||return($s->error("${m}: cannot list $tq:",erros()));
 	
  }
  foreach my $sn (sort keys %$sh) {
@@ -1733,7 +1739,7 @@ sub mfpg {	# Put/Get newer multiple files
 				: ref($cl[0])
 				? (undef, $cl[0])
 				: ());
-			return($s->error("${m}: cannot recurse '$sn': $!"))
+			return($s->error("${m}: cannot recurse '$sn':",erros()))
 				if !$v;
 			$rv =1	if $v ==1;
 		}
@@ -1759,7 +1765,7 @@ sub mfpg {	# Put/Get newer multiple files
 			($m eq 'mput'
 			? $s->fput($o, $sq .$ns .$sn, $tp .$ns .$sn)
 			: $s->fget($o, $sq .$ns .$sn, $tp .$ns .$sn))
-			|| return($s->error("${m}: cannot transfer '$sn': $!"));
+			|| return($s->error("${m}: cannot transfer '$sn':",erros()));
 		}
 	}
  }

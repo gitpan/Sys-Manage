@@ -835,6 +835,13 @@ using C<rename>().
 I.e. C<acRegRen>({...},'.err').
 
 
+=item banner () -> print general header.
+
+=item banner (text) -> print text as header.
+
+Print header.
+
+
 =item echo (args) -> print (args).
 
 Output to user. Alike C<print>().
@@ -856,6 +863,11 @@ Failure exit.
 =item fcopy (source dir/mask, target dir)
 
 Copy files and directories.
+Options: 
+'i'gnore errors;
+'r'ecurse (default); 
+'s'tat[mtime] to escape superfluous operation;
+'v'erbose.
 
 
 =item fedit (file, sub(self, file, $_=content){} -> new content) -> fwrite() | die
@@ -864,6 +876,17 @@ Edit file.
 Loads file using C<fread>(file),
 executes editor sub{} to achieve new content,
 stores content changed using C<fwrite>(file).
+
+
+=item ffind (?-opt, path, sub{}(self, full, dir, elem=$_))
+
+=item ffind (?-opt, path, false, post sub{}(self, full, dir, elem=$_))
+
+File find.
+Post processing is to see a directory after it's contents.
+Options:
+'i'gnore errors;
+'r'ecurse (default).
 
 
 =item fglob (path with mask) -> (dir list) | die
@@ -881,6 +904,17 @@ See also C<ftmp>.
 =item fread (?'-b', file name) -> content | die
 
 Reads file, returns it's content as a scalar.
+
+
+=item frun (?-opt, command, arg,...) -> success
+
+=item frun (?-opt, 'do', script file, arg,...) -> result
+
+Execute command or Perl script.
+Options: 
+'e'xit code / result consider;
+'i'gnore errors;
+'v'erbose.
 
 
 =item ftmp (?assignment, ?pid) -> temp file name
@@ -909,9 +943,24 @@ Creates user shell menu elements (C<-menu>, C<-mcf>) for assignment.
 Constructor to create new object.
 
 
+=item nnames () -> [node names]
+
+Individual and group names of the computer.
+
+
 =item Run (command line args)
 
 Executes C<Script Configuration> assigned by C<Script>.
+
+
+=item runmngr (command line args) -> as manager?
+
+Tests if run as manager ('', C<refresh>, C<query>, C<agent say>).
+
+
+=item runuser (command line args) -> as user?
+
+Tests if run as user (C<logon>, C<logoff>, C<runapp>).
 
 
 =item set () -> (slot names of the object)
@@ -922,7 +971,12 @@ Executes C<Script Configuration> assigned by C<Script>.
 
 Retrieves and sets values of the C<Script Configuration>.
 $s->{-option} direct access may be used also, 
-but C<set> smartly processes some options.
+but C<set> additionally processes some options.
+
+
+=item unames () -> [user names]
+
+Individual and group names of the user.
 
 
 =item w32ADSystemInfo () -> IADsADSystemInfo object
@@ -939,6 +993,20 @@ Example: w32ADSystemInfo->{DomainShortName}
 Windows 2000 DC.
 Path to 'scripts' subdirectory in 'netlogon' share if domain controller.
 See also C<w32srv>.
+
+
+=item w32nuse () -> 'net use' text
+
+=item w32nuse (drive) -> network path used
+
+=item w32nuse (?-opt, drive, path, ?opt,...) -> drive used
+
+=item w32nuse (?-opt, drive, '/d') -> delete drive
+
+Windows 'net use' command clever execution.
+Options: 
+'i'gnore errors;
+'v'erbose.
 
 
 =item w32olenew (progid, ?destructor) -> object | die
@@ -986,6 +1054,20 @@ May be useful for C<system> assignments affecting user profiles.
 
 Win32. Returns true for Windows server or domain controller.
 See also C<w32dcf>.
+
+
+=item w32umnu ('mpdiv', item name, option => value)
+
+=item w32umnu ('mpdiv', -w32umnu subdir name)
+
+=item w32umnu ('iv', filter sub{}(ffind args))
+
+Win32 User Menu definition (start 'm'enu, 'p'rograms, 'd'esktop).
+C<w32umnu>('mpd') creates a menu item
+from L<Win32::Shortcut|Win32/Shortcut> parameters
+or items from subdirectory of C<-w32umnu> base path.
+C<w32umnu>('', sub{}) unlinks items found by C<ffind>, but not mentioned.
+Additional options may be 'i'gnore errors and 'v'erbose.
 
 
 =item w32wmiq (class | query) -> SWbemObjectSet
@@ -1114,6 +1196,14 @@ See also at the top of the source code.
 =head1 VERSION
 
 =over
+
+
+=item '2008-08-12'
+
+Extended C<fcopy>().
+Documented C<nnames>() and C<unames>().
+New C<runmngr>(), C<runuser>(), C<frun>(), C<ffind>(), C<w32nuse>().
+
 
 =item '2008-05-20'
 
