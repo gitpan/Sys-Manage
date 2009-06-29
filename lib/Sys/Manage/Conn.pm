@@ -5,6 +5,7 @@
 # makarow, 2005-09-19
 #
 #
+# - timeouts with $SIG{ALRM} and alarm() for 'sub connect' and 'sub agt'
 # !!! ??? see in source code.
 # ??? interactive to user commands.
 # ??? do not use -b- option due to incorrect file sizing.
@@ -21,7 +22,7 @@ use IO::Select;
 use Safe;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.61';
+$VERSION = '0.62';
 
 my $qlcl =0;	# quoting local args not needed because of shell quoting
 
@@ -88,6 +89,7 @@ sub initialize {	# Initialize newly created object
 				: eval('use Sys::Hostname; Sys::Hostname::hostname')
 				)]->[4]))}
 	,-perl		=>'perl'		# agent perl path
+	#-w32ver	=>undef			# Win32::GetOSVersion
 	#-wmi		=>undef			# WMI connection
 	#-wmisil	=>undef			# WMI security impersonation level
 	#-wmisoon	=>undef			# WMI option: at timeout / scheduler impersonation
@@ -225,6 +227,13 @@ sub isscript {		# Is script in given $ENV{SMLIB}
 }
 
 
+sub w32ver {		# Win32::GetOSVersion
+			# (?index)
+ $_[0]->{-w32ver} =[Win32::GetOSVersion()] if !$_[0]->{-w32ver};
+ $_[1] ? $_[0]->{-w32ver}->[$_[1]] : $_[0]->{-w32ver}
+}
+
+
 sub isqclad {		# May need shell quote command line arg
 	$_[1] =~/[&<>\[\]{}^=;!'+,`~\s%"?*|()]/	# ??? see shell
 }
@@ -280,7 +289,9 @@ sub error {		# Error final
 
 
 sub erros {
- ($! +0) .'. ' .$! .($^E ? ' (' .($^E +0) .'. ' .$^E .')' : '')
+ $!
+ ? ($! +0) .'. ' .$! .($^E ? ' (' .($^E +0) .'. ' .$^E .')' : '')
+ : '0' 
 }
 
 
@@ -291,17 +302,23 @@ sub echo {		# Echo printout
 #	,($_[0] ? ('[',shift,'] ') : '')
 #	, @_);
  my $t =time() -$s->{-time};
+#print(  ($_[0] =~/^\n+$/ ? shift : ())
+#	,($_[0] ? ('[',shift, ($t ? (' ', $t,'s') : ()), '] ') : '')
+#	, @_);
  print(  ($_[0] =~/^\n+$/ ? shift : ())
-	,($_[0] ? ('[',shift, ($t ? (' ', $t,'s') : ()), '] ') : '')
+	,($_[0] ? (shift, '(', $t, 's) ') : '')
 	, @_);
  STDOUT->flush(); STDERR->flush();	
 }
 
 
 sub oleerr {		# OLE error message
-	(Win32::OLE->LastError()||'undef') 
-	.' ' 
-	.(Win32::OLE->LastError() && Win32::FormatMessage(Win32::OLE->LastError()) ||'undef');
+	my $e =Win32::OLE->LastError();
+	$e
+	? ($e||'0')
+	. '. '
+	. Win32::FormatMessage($e)
+	: '0'
 }
 
 
@@ -482,22 +499,36 @@ sub connect {		# Connect agent node
 		#	The account of Agent computer must be marked as 'Trusted for delegation'...
 		# 3 - Allows objects to use the credentials of the caller.
 		#	Recommended for Scripting API for WMI calls.
-	if (!$s->{-pswd}) {
+		# Foreign Win2003 DC: 'AssignPrimaryToken' ('Replace a process level token')
+		#	privilege may be needed
+		# NETSH.EXE FIREWALL may be needed
+		# Diag with 'WBEMtest' from Windows; 'WMIDiag', 'WMITools', 'OLEView' from Microsoft.
+	if (0 && !$s->{-pswd}) {
 		$wmisil =3 if !defined($wmisil);
 		$s->{-wmi} =Win32::OLE->GetObject(
+		#	'winmgmts:{impersonationLevel=impersonate, (AssignPrimaryToken)}!//'
 			'winmgmts:{impersonationLevel=impersonate}!//'
 			.$s->{-node} .'/root/cimv2')
 			|| return($s->error('WMI->GetObject:',$s->oleerr()))
 	}
 	else {
-		$wmisil =[4,3] if !defined($wmisil);
+		$wmisil =$s->{-pswd} ? [4,3] : 3 if !defined($wmisil);
 		$s->{-wmi} =Win32::OLE->new('WbemScripting.SWbemLocator')
 			|| return($s->error('WMI->new:',$s->oleerr()));
 		$s->{-wmi}->{Security_}->{ImpersonationLevel}=ref($wmisil) ? $wmisil->[0] : $wmisil;
 		$s->{-wmi} =$s->{-wmi}->ConnectServer($s->{-node}
 					,'root\\cimv2'
-					,$s->{-user}
-					,$s->{-pswd})
+					,$s->{-user} ||''
+					,$s->{-pswd} ||''
+					,''	# strLocale
+					,''	# strAuthority
+					,	# iSecurityFlags
+					($s->w32ver(1) >=5) && ($s->w32ver(2) >=1)
+					# && (!defined($s->{-timeout}) ||$s->{-timeout})
+					&& $s->{-timeout}
+					? (128)	# wbemConnectFlagUseMaxWait / WBEM_FLAG_CONNECT_USE_MAX_WAIT, to return in 2 minutes or less
+					: ()
+					)
 			|| return($s->error('WMI->ConnectServer:',$s->oleerr()))
 	}
 	foreach my $lvl (ref($wmisil) ? @$wmisil : $wmisil) {
@@ -583,7 +614,7 @@ sub connect {		# Connect agent node
 			$rs =$s->{-wmi}->Get("Win32_Service='$rn'");
 			if (!$rv) {
 				$rv =$rs->Delete() if $rs;
-				$rv && return($s->error('WMI->Win32_Service->Delete:',$rv));
+				$rv && return($s->error('WMI->Win32_Service->Delete:',$rv,'('.($s->oleerr()||'see MSDN').')'));
 				$rs =undef;
 				return($s->error('WMI->Win32_Service->Create:','rollback'));
 			}
@@ -598,7 +629,7 @@ sub connect {		# Connect agent node
 				if $s->{-echo} >2;
 			$rs->StopService() if $rs->{State} ne 'Stopped';
 			my $rv =$rs->StartService();
-			   $rv	&& return($s->error("WMI->Win32_Service->Start($rn): $rv ",$s->oleerr()));
+			   $rv	&& return($s->error("WMI->Win32_Service->Start($rn):",$rv,'('.($s->oleerr()||'see MSDN').')'));
 			$agt ='';
 		}
 		else {
@@ -617,7 +648,7 @@ sub connect {		# Connect agent node
 			, "...\n") if $agt && ($s->{-echo} >2);
 	my $pid =undef;
 	my $ret =$agt && $s->{-wmiph}->Create($agt,undef,undef,$pid);
-		$ret	&& return($s->error('WMI->Win32_Process->Create:',$s->oleerr(),$ret));
+		$ret	&& return($s->error('WMI->Win32_Process->Create:',$ret,'('.($s->oleerr()||'see MSDN').')'));
 		# !!! may be Win32_Process.Create==1 ???
 	if ($s->{-wmisis}) {
 		$s->{-wmipid} =undef;
@@ -632,6 +663,7 @@ sub connect {		# Connect agent node
  }
  elsif ($s->{-init} eq 'rsh') {	# using remote shell
 	$s->echo("\n",'connect','rsh',$ctp) if $s->{-echo};
+	$agt =~s/\$/\\\$/g; $agt =~s/'/''/g; $agt =~s/\\"/\\\\\\"/g; $agt ="'" .$agt ."'";
 	my @c = ('rsh',
 		,($s->{-user} ? ('-l', $s->{-user}) : ())
 		,$s->{-node}, $agt);
@@ -699,8 +731,9 @@ sub connect {		# Connect agent node
 }
 
 
-sub getrow {	# Get row from agent
+sub agtrow {	# Get row from agent
 		# () -> row | undef
+		# while (defined($row =$s->agtrow())) {
 	#   !$_[0]->{-timeout}
 	# ? $_[0]->{-agent}->getline()
 	# : !$_[0]->{-select}->can_read($_[0]->{-timeout})
@@ -708,6 +741,35 @@ sub getrow {	# Get row from agent
 	# : $_[0]->{-agent}->getline()
 	$_[0]->{-agent}->getline()
 }
+
+
+#sub getrow {	# Get row from agent
+#		# () -> row | undef
+#	$_[0]->{-agent}->getline()
+#}
+
+
+sub agtprintflush {	# printflush to agent
+			# (...) -> printflush
+	$_[0]->{-agent}->printflush(@_[1..$#_])
+}
+
+
+sub agtread {	# read from agent
+		# (...) -> read || $@
+	my $r =$_[0]->{-agent}->read(@_[1..$#_]);
+	$@ ='read: ' .erros() if !defined($r);
+	$r
+}
+
+
+sub agtwrite {	# write to agent
+		# (...) -> write || $@
+	my $r = $_[0]->{-agent}->syswrite(@_[1..$#_]);
+	$@ ='syswrite: ' .erros() if !defined($r);
+	$r
+}
+
 
 
 sub reval0 {	# Remote Eval perl code without any additions
@@ -733,19 +795,19 @@ sub reval0 {	# Remote Eval perl code without any additions
 	);
 	if ($s->{-debug}) {
 		$s->echo('rpl',$agt,"\n");
-		$s->{-agent}->printflush($agt,"\n");
+		$s->agtprintflush($agt,"\n");
 		$s->getret();
 		$s->echo('rpl',@_[1..$#_],"\n");
-		$s->{-agent}->printflush(@_[1..$#_],"\n");
+		$s->agtprintflush(@_[1..$#_],"\n");
 	}
 	else {
 		$s->echo('rpl', $agt, @_[1..$#_],"\n") if $s->{-echo} >2;
-		$s->{-agent}->printflush($agt,@_[1..$#_],"\n");
+		$s->agtprintflush($agt,@_[1..$#_],"\n");
 	}
  }
  else {
 	$_[0]->echo('rpl',@_[1..$#_],"\n") if $_[0]->{-echo} >2;
-	$_[0]->{-agent}->printflush(@_[1..$#_],"\n");
+	$_[0]->agtprintflush(@_[1..$#_],"\n");
  }
  $_[0]
 }
@@ -758,7 +820,7 @@ sub getret {	# Get return of remote eval
  my $mrk =$s->{-mark};
  @$s{qw(-errexit -errchild -erros -erros1 -erreval -reteval)}
 	=(0,0,'','','',undef);
- while (defined($row =$s->getrow())) {
+ while (defined($row =agtrow($s))) {
 	if ($row =~/^\Q$mrk\E(\d+\t.*)/) {
 		my $ret =$1;
 		$ret =$` if $ret =~/[\r\n]+$/;
@@ -790,7 +852,7 @@ sub getret {	# Get return of remote eval
 			 ? ("\t->",ref($s->{-reteval}))
 			 : ("\t->",$s->{-reteval})
 			 )
-			, "\n") if $s->{-echo} >1;
+			, "\n\n") if $s->{-echo} >1;
 		last;
 	}
 	elsif ($_[1]) {
@@ -1078,7 +1140,7 @@ sub fget {	# Get remote file
 	.'}';
  $s->reval0($cr)
 	|| return($s->error($@));
- my $fs =$s->getrow(); 
+ my $fs =$s->agtrow(); 
  return($s->error('Connection stop'))
 	if !defined($fs);
  chomp($fs);
@@ -1091,7 +1153,7 @@ sub fget {	# Get remote file
  }
  my $fl =$fs->[7] ||0;
  if (($o =~/s(?![0-])/) || !defined($fm)) {
-	$s->{-agent}->read($fm, $fl);
+	agtread($s, $fm, $fl);
 	return(!$s->getret() ||$s->{-erreval} ? undef : $fm)
  }
  if((-f $fm) && (!-w $fm)) {
@@ -1105,8 +1167,8 @@ sub fget {	# Get remote file
  while ($fc <$fl) {
 	$ft =$fc+$op <= $fl ? $op : $fl-$fc;
 	# $s->{-select}->can_read(10);
-	return($s->error('fget: read:', erros()))
-		if !defined($s->{-agent}->read($fb, $ft));
+	return($s->error('fget: agtread:', $@))
+		if !defined(agtread($s, $fb, $ft));
 	return($s->error('fget: syswrite:', erros()))
 		if !defined($fh->syswrite($fb, $ft));
 	$fc +=$ft;
@@ -1228,7 +1290,7 @@ sub fput {	# Put remote file
 	.'}';
  $s->reval0($cr)
 	|| return($s->error($@));
- my $fl =$s->getrow(); defined($fl) && chomp($fl);
+ my $fl =$s->agtrow(); defined($fl) && chomp($fl);
     $fl =!defined($fl)
 	? return($s->error('Connection stop'))
 	: ($fl =~/^([\d\t]+)$/)
@@ -1237,7 +1299,7 @@ sub fput {	# Put remote file
 	? $s->error($fl)
 	: return(do{my $r =$s->error($fl); $s->getret($fe); $r});
  if ($o =~/s(?![0-])/) {
-	$s->{-agent}->syswrite($fm);
+	agtwrite($s, $fm);
 	$s->getret($fe);
 	return($s->{-reteval});
  }
@@ -1249,8 +1311,8 @@ sub fput {	# Put remote file
 	# $s->{-select}->can_read(10);
 	return($s->error('fput: sysread:', erros()))
 		if !defined($fh->sysread($fb, $ft));
-	return($s->error('fput: syswrite:', erros()))
-		if !defined($s->{-agent}->syswrite($fb, $ft));
+	return($s->error('fput: agtwrite:', $@))
+		if !defined(agtwrite($s, $fb, $ft));
 	$fc +=$ft;
 	print '.' if $s->{-progress} && $s->{-echo};
  }
@@ -1742,6 +1804,7 @@ sub mfpg {	# Put/Get newer multiple files
 			return($s->error("${m}: cannot recurse '$sn':",erros()))
 				if !$v;
 			$rv =1	if $v ==1;
+			$rv =1	if $v ==2;
 		}
 	}
 	elsif (!defined($sh->{$sn}->[7]) || !defined($sh->{$sn}->[9])) {

@@ -20,6 +20,25 @@ See particular modules.
 
 =over
 
+
+=item '2009-06-30'
+
+Publishing 0.62 version.
+
+L<Sys::Manage::Cmd|Sys/Manage/Cmd>: changed log file format,
+new 'logask' and 'regask' embedded commands to analyse log and reg files;
+some improvements.
+
+L<Sys::Manage::Conn|Sys/Manage/Conn>: some improvements and corrections.
+
+L<Sys::Manage::Desktops|Sys/Manage/Desktops>: some corrections, improvements, additions.
+
+L<Sys::Manage::Schedule|Sys/Manage/Schedule>: changed log file format,
+new '-logask'/'logask' command to analyse log file;
+additional command line parameters may be added after '-run'/'-surun' name;
+some improvements.
+
+
 =item '2008-09-21'
 
 Publishing 0.61 version, 

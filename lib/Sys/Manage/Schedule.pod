@@ -41,10 +41,14 @@ Sys::Manage::Schedule - Scriptic schedule trunk
 	-set		(default) add/replace scriptic schedule into system schedule
 	-setdel		clear scriptic schedule from system schedule
 	-run	atarg	running 'atarg' entry from system scheduler
-	-runsu	atarg	running 'atarg' entry switching user
+	-surun	atarg	running 'atarg' entry switching user
 	-svcinst	install scriptic schedule as win32 service to switch user
 	-svcinst user password
-	-svcdel		remove scriptic schedule win32 sevice	
+	-svcdel		remove scriptic schedule win32 sevice
+	-logask		filter and display log file
+
+	-run	name	arg...	running as named command line,
+	-surun	name	arg...		user may be switched
 
 =item 'at' call options
 
@@ -139,14 +143,6 @@ Log file automatic truncation implemented, see C<-logmax>.
 	=> about 1024*1024 | false
 
 Maximum size of log file, bytes. Used for automatic truncation.
-
-
-
-=item -logpid
-
-	=> true | false | pid file name
-
-Create runtime pid file for monitoring and diagnostics during runtime.
 
 
 
@@ -346,6 +342,14 @@ Writes file or appends to it.
 DNS domain, host, node name of this computer.
 
 
+=item logask (?-opts, ?start, ?end, condition)
+
+Filter log file.
+Options: 'v'erbose output (default), 's'tring return (for function call);
+'>=' or '<=' start and end conditions (default), '>' or '<' conditions.
+Start and End: 'yyyy-dd-mm...' row sample; /[\d]+[dhm]/ - days, hours, minutes ago.
+Query: 'all' (default), 'pid's running, 'err'ors, expression.
+
 
 =item new ('class', -option=>value,..) -> new object
 
@@ -404,10 +408,11 @@ Implemented for Windows only.
 See also C<at>, C<-i>, C<-s>, C<-w>.
 
 
+=item soon (?-options, seconds, command line) -> at
 
-=item soon (?-options, seconds, 'command line') -> at
+=item soon (?-options, seconds, program, ?arg,...) -> at
 
-=item soon (?-options, seconds, 'self', -runmod, -runarg) -> at
+=item soon (?-options, seconds, 'self', -runmod, -runarg, ?arg,...) -> at
 
 Schedules command line given with delay, C<-i> option is available.
 Alike 'soon' utility in Windows Resource Kit.
@@ -440,7 +445,7 @@ without additional '-' signs.
 
 =item -a
 
-Execute at any C<-run> or C<-runsu>.
+Execute at any C<-run> ('-a') or C<-runsu> ('-as').
 
 
 =item -d0
@@ -464,10 +469,12 @@ Only one of this options may be included in each C<at>.
 =item -i
 
 Execute interactivelly,
-C<soon> only.
+Only for C<soon> and C<-d0> etc.
 
 
 =item -s
+
+=item (C<-s>,0)
 
 Execute switching user (C<-runsu>).
 
@@ -477,6 +484,7 @@ or via WMI (C<-susr> and C<-spsw> required).
 
 On other platforms 'su' is called by 'root', 'sudo' otherwise.
 
+Special C<at>('-s',0) form means automatic win32 service startup at operating system startup.
 
 
 =item -w
@@ -499,12 +507,15 @@ Usually operator need not deal with any run mode,
 because C<-set> is default, when empty arguments.
 
 The mainly used run modes are
-C<-set>, C<-setdel>, C<-run>, C<-runsu>.
+C<-set>, C<-setdel>, C<-run>, C<-surun>/C<-runsu>.
 
 Supplemental run modes are
-C<-svcinst>, C<-svcdel>.
+C<-logask>, C<-svcinst>, C<-svcdel>.
 
-Internal run mode is C<-surun>
+
+=item -logask
+
+Filter and display log file, see C<logask>.
 
 
 =item -run
@@ -514,7 +525,7 @@ Run C<-runarg> entry.
 
 =item -runsu
 
-Run C<-runarg> entry switching user (C<-s> option of C<at>).
+Run C<-runarg> entry after user switched (C<-surun>, C<-s> option of C<at>).
 
 
 =item -set
@@ -553,8 +564,7 @@ Settings of service created should be checked.
 
 =item -surun
 
-Switch user and execute C<-runsu> C<-runarg>.
-Used internally for transition from system scheduler.
+Switch user and execute C<-runsu> C<-runarg> (C<-s> option of C<at>).
 
 
 =back
@@ -562,6 +572,22 @@ Used internally for transition from system scheduler.
 =head1 VERSION
 
 =over
+
+
+=item '2009-06-24'
+
+Named command lines implemented: perl atSched.pl -run|-surun name arg...
+
+C<soon> extended to accept program arguments as list. 
+
+So, schedule script may be used also to log some unforeseen commands.
+
+
+=item '2008-12-18'
+
+Changed format of log file and messages.
+
+C<-logpid> removed - use C<logask> command instead.
 
 
 =item '2007-11-08'

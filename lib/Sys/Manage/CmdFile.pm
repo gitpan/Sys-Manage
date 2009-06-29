@@ -16,7 +16,7 @@ use IO::File;
 use Fcntl qw(:DEFAULT :flock :seek :mode);
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.61';
+$VERSION = '0.62';
 
 1;
 
@@ -187,7 +187,7 @@ sub dofile {		# Command queue
 			$run =$row;
 			$run =$` if $run =~/[\r\n\s]+$/;
 			if ($hql) {
-				$hql->print($s->strtime(),' $$',$$,"\t",$run,"\n");
+				$hql->print($s->strtime()," [$$]:\t",$run,"\n");
 				$hql->flush();
 				if (!$fqr && $fql && 0) {
 					$hql->close(); $hql =undef;
@@ -218,7 +218,7 @@ sub dofile {		# Command queue
 				$err =$@;
 			}
 			elsif (!ref($fqp) && ($s->{-dofck} ? $fqp : 1)) {
-				print('$$', $$, ' ', ($fqp ? $fqp .' ' : '')
+				print("[$$]: ", ($fqp ? $fqp .' ' : '')
 					, $_, ' (' ,$fqi, ")\n")
 					if !$s->{-dofck};
 				$err =
@@ -240,7 +240,7 @@ sub dofile {		# Command queue
 			$hql =$s->iofopen('>>' .$fql)
 				if !$hql && $fql;
 			
-			$hql->print($s->strtime(),' $$',$$,"\terror: $err\n")
+			$hql->print($s->strtime()," [$$]:\tError: $err\n")
 				if $hql && $err;
 
 			$erc =($erc||0 +1)

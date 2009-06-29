@@ -20,7 +20,7 @@ use POSIX qw(:sys_wait_h);
 use Data::Dumper;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.61';
+$VERSION = '0.62';
 
 1;
 
@@ -57,6 +57,7 @@ sub initialize {	# Initialize newly created object
 			: $0}
 	,-prgcn		=>			# program common name
 			do{my $v =$s->class; $v=~s/::/-/g; $v}
+	#,-runmod	=>undef			# run mode, for logging
 	#-config	=>undef			# config use, '-cfg' also
 	,-error		=>'die'			# error handler
 
@@ -65,6 +66,7 @@ sub initialize {	# Initialize newly created object
 	,-echol		=>2		# -v#	# ... verbosity level
 	,-log		=>undef			# log file name
 	#-logh					# log file handler
+	#-autoflush	=>undef			# autoflush
 	,-logevt	=>undef			# log event trigger sub{}
 	#-logevth*				# log event trigger handles
 	,-vsml		=>'!'			# var subst mark left
@@ -128,10 +130,10 @@ sub initialize {	# Initialize newly created object
 sub daemonize {		# Daemonize process
  my $s =$_[0];
  my $null =$^O eq 'MSWin32' ? 'nul' : '/dev/null';
- open(STDIN,  "$null")  || return($s->error("daemonize(STDIN) -> $!")); 
- open(STDOUT,">$null")  || return($s->error("daemonize(STDOUT) -> $!"));
+ open(STDIN,  "$null")  || return($s->error($$,'','',"daemonize(STDIN) -> $!")); 
+ open(STDOUT,">$null")  || return($s->error($$,'','',"daemonize(STDOUT) -> $!"));
  eval("use POSIX 'setsid'; setsid()");
- open(STDERR,'>&STDOUT')|| return($s->error("daemonize(STDERR) -> $!"));
+ open(STDERR,'>&STDOUT')|| return($s->error($$,'','',"daemonize(STDERR) -> $!"));
  $s
 }
 
@@ -139,6 +141,7 @@ sub daemonize {		# Daemonize process
 sub DESTROY {
  my $s =$_[0];
  $s->vgxf('d') if $s->{-vgxi};
+ $s->echowr($$,'End' .($s->{-runmod}||''), '',$?) if $s->{-runmod};
 }
 
 
@@ -163,7 +166,7 @@ sub set {               # Get/set slots of object
 		my $f =$s->{-dirb} .($b ? $s->{-dirm} .$b : '') .$s->{-dirm} .$o;
 		next if !-f $f;
 		eval{local $_ =$s; do $f; 1}
-			|| $s->error("wrong config '$f': $@");
+			|| return($s->error($$,'','',"wrong config '$f': $@"));
 		last
 	}
  }
@@ -289,7 +292,7 @@ sub set {               # Get/set slots of object
 	my $logevth =$opt{-logevt};
 	$opt{-logevt} =
 		  $opt{-logevt} =~/\bSys::Syslog\b/i
-		? $s->error("unimplemented '-logevt'=>" .$s->{-logevt})
+		? return($s->error($$,'','',"unimplemented '-logevt'=>" .$s->{-logevt}))
 		: $opt{-logevt} =~/\bopcmsg\b/i
 		? sub{my($s,$l,$c,$x)=@_;
 			system($logevth
@@ -329,7 +332,7 @@ sub set {               # Get/set slots of object
 				});
 			# $s->{-logevth}->Close(); $s->{-logevth}=undef;
 			}
-		: $s->error("bad '-logevt'=>" .$s->{-logevt});
+		: return($s->error($$,'','',"bad '-logevt'=>" .$s->{-logevt}));
  }
  $opt{-vgxf} =($opt{-prgcn} ||$s->{-prgcn})
 	.'-' .time() .'-' .$$ .'-vgx.pl'
@@ -345,7 +348,7 @@ sub set {               # Get/set slots of object
 
 
 sub strtime {		# Log time formatter
-	my @t =localtime();
+	my @t =defined($_[1]) ? localtime($_[1]) : localtime();
 	 join('-', $t[5]+1900, map {length($_)<2 ? "0$_" : $_} $t[4]+1,$t[3]) 
 	.' ' 
 	.join(':', map {length($_)<2 ? "0$_" : $_} $t[2],$t[1],$t[0])
@@ -402,32 +405,41 @@ sub qclauw {	# UnEscape command line wholly, preserving -options
 }
 
 
-sub error {		# Error final
- my $s =$_[0];		# (strings) -> undef
- my $e =join(' ', map {defined($_) ? $_ : 'undef'} @_[1..$#_]);
- eval{STDOUT->flush()};
- $@ =$e;
- $s && $s->{-log} && $s->echolog("Error: $e");
- $@ =$e;
- !$s || ($s->{-error} eq 'die')
- ? croak("Error: $e\n")
- : ($s->{-error} eq 'warn')
- ? carp("Error: $e\n")
- : return(undef);
- return(undef);
+
+sub autoflush {		# set autoflush
+ my $s =$_[0];
+ return($s->{-autoflush}) if !defined($_[1]);
+ my @f =(select(), do{select(STDERR); $|}, do{select(STDOUT); $|});
+ select(STDERR); $|=$s->{-autoflush};
+ select(STDOUT); $|=$s->{-autoflush};
+ $s->{-logh}->autoflush($s->{-autoflush}) if $s->{-logh};
+ select($f[0]);
 }
 
 
-sub echo {		# Echo message
- print	(($_[0]->{-echo} =~/t/ ? ($_[0]->strtime(), ' ') : ())
-	,'$$',($ENV{SMPID} && ($ENV{SMPID} ne $$) ? $ENV{SMPID} .',' : ''), $$
-	,' ',@_[1..$#_],"\n")
-	if $_[0]->{-echol};
- $_[0]->echolog(@_[1..$#_]) if $_[0]->{-log};
+sub flush {		# Flush STDOUT/STDERR
+ eval('use IO::File; STDOUT->flush(); STDERR->flush()');
+ $_[0]->{-logh} && $_[0]->{-logh}->flush();
+ 1
 }
 
 
-sub echolog {		# Echo log message
+sub echomap {		# Map echo args to print/write
+ return(('[', $_[1]||$$, ']: '
+	, $_[2] ||''
+	, $_[3] && ($_[3] =~/^\d+$/) ? ('[', $_[3], ']: ') : $_[2] ? (': ', $_[3]||'') : ($_[3]||'')
+	, @_[4..$#_]
+	))
+}
+
+
+sub echo {		# Echo to stdout
+	print(!$#_ ? () : ($_[0]->{-echo} =~/t/ ? strtime($_[0]) .' ' : '', echomap(@_)), "\n")
+		if $_[0]->{-echol}
+}
+
+
+sub echowr {		# Echo to log
  if ($_[0]->{-log}) {
 	if (!$_[0]->{-logh}) {
 		my $s =$_[0];
@@ -435,45 +447,316 @@ sub echolog {		# Echo log message
 			.$s->{-prgcn} .'-log.txt' if $s->{-log} =~/^\d+$/;
 		my $fn =$s->{-log};
 		$s->{-logh} =IO::File->new('>>' .$s->{-log})
-			|| return($s->error("cannot open '" .$s->{-log} ."': $!"));
+			|| return($s->error($$,'','',"cannot open '" .$s->{-log} ."': $!"));
 	}
-	$_[0]->{-logh}->print(
-		$_[0]->strtime(),' '
-		,$_[0]->{-prgsn}
-		,' $$',($ENV{SMPID} && ($ENV{SMPID} ne $$) ? $ENV{SMPID} .',' : ''),$$
-		,"\t"
-		,@_[1..$#_],"\n");
+	$_[0]->{-logh}->print(!$#_ ? () : (strtime($_[0]),' ',echomap(@_)),"\n")
  }
 }
 
 
-sub echologq {		# Echo log query PIDs
- my $s =$_[0];
+sub echowrf {		# Echo to log force
+ echowr(@_)
+}
+
+
+sub echolog {		# Echo + log
+ echo(@_); echowr(@_)
+}
+
+
+sub warning {		# Echo Warning
+ my @a =($_[0], $_[1]||$$, $_[2] ||'Warning', @_[3..$#_]);
+ echowrf(@a); carp(join('', echomap(@a)) ."\n")
+}
+
+
+sub error {		# Error finish
+ flush(@_);
+ my @a =($_[0], $_[1]||$$, $_[2] ||'Error', @_[3..$#_]);
+ echowrf(@a);
+ !$_[0] || ($_[0]->{-error} eq 'die')
+ ? croak(join('', echomap(@a),"\n"))
+ : ($_[0]->{-error} eq 'warn')
+ ? carp(join('', echomap(@a),"\n"))
+ : return(undef);
+ return(undef);
+}
+
+
+sub logask {		# Echo log query
+ my $s =shift;		# (-opt, start, end, on row, on end)
+			# >, >=, <, <=, 'v'erbose, 's'calar
+			# 'pid's, 'err'ors, 'all'
+ my $o =$_[0] && (($_[0] eq '-') || ($_[0] =~/^-[^\d]/i)) ? shift : '-v';
+ my $ds=$_[0] && ($_[0] =~/^[-\d]/) ? shift : undef;
+ my $de=$_[0] && ($_[0] =~/^[-\d]/) ? shift : undef;
+ my $q0=shift ||'all';
+ my $q1= $q0;
+ my $q2= shift;
+ my $ll='';
+ my $rr='';
+ my ($id, %rq, $rq);
+ local $_;
  return(undef) if !$s->{-log};
  $s->{-log} =$s->{-dirb} .$s->{-dirm} .'var' .$s->{-dirm} 
 	.$s->{-prgcn} .'-log.txt' 
 	if $s->{-log} =~/^\d+$/;
  my $fh =IO::File->new('<' .$s->{-log})
-	|| return($s->error("cannot open '" .$s->{-log} ."': $!"));
- my $qs =$^O eq 'MSWin32' ? (`tasklist 2>nul` || `tlist 2>nul` ||'') : `ps 2>nul`;
- my (%pid, $row);
- while (defined($row =readline($fh))) {
-	next if $row !~/\d\d\d\d-\d\d-\d\d\s/;
-	next if $row !~/\$\$(\d+)/;
-	my $id =$1;
-	if ($row =~/\s(?:Backlogs|CmdExit|CmdExcess|Error):\s/) {
-		delete $pid{$id};
-	}
-	elsif (!$pid{$id}) {
-		$pid{$id} =$row if $qs =~/\b\Q$id\E\b/;
+	|| return($s->error($$,'','',"cannot open '" .$s->{-log} ."': $!"));
+ $ds =	!$ds || ($ds =~/^\d\d\d\d-\d\d-\d\d/)
+	? $ds
+	: $ds =~/^-*(\d+)m/i
+	? $s->strtime(time() -$1 * 60)
+	: $ds =~/^-*(\d+)h/i
+	? $s->strtime(time() -$1 * 60 * 60)
+	: $ds =~/^-*(\d+)d/i
+	? $s->strtime(time() -$1 * 60 * 60 *24)
+	: $s->strtime(time() + eval($ds)||0);
+ $de =	!$de || ($de =~/^\d\d\d\d-\d\d-\d\d/)
+	? $de
+	: $de =~/^-*(\d+)m/i
+	? $s->strtime(time() -$1 * 60)
+	: $de =~/^-*(\d+)h/i
+	? $s->strtime(time() -$1 * 60 * 60)
+	: $de =~/^-*(\d+)d/i
+	? $s->strtime(time() -$1 * 60 * 60 *24)
+	: $s->strtime(time() + eval($de)||0);
+ if (ref($q1)) {}
+ elsif ($q1 =~/^all/i) {
+	$q1 =sub{1}
+ }
+ elsif ($q1 =~/^pid/i) {
+	$rq=join("\n"
+		,map {/perl/i ? $_ : ()
+			} split /[\r\n]+/, ($^O eq 'MSWin32' ? (`tlist 2>nul` ||`tasklist 2>nul` || '') : `ps 2>nul`));
+	$q1=sub{if (/^\d{2,4}-\d\d-\d\d\s+\d\d:\d\d:\d\d\s+\[(\d+)\]/){
+			my $id =$1;
+			if (/[\]:]\s+(?:End|Exit)\w*[\[:]/i) {
+				delete $rq{$id}
+			}
+			elsif ($rq !~/\b\Q$id\E\b/) {
+			}
+			elsif (!$rq{$id}) {
+				$rq{$id} =$_
+			}
+			elsif (/[\]:]\s+(?:Start\w*)[\[:]/i) {
+				$rq{$id} =$_
+			}
+			elsif (/[\]:]\s+(?:Logging)[\[:]/) {
+				$rq{$id} .=$_ if $rq{$id}
+			}
+		}; ''};
+	$q2 =sub{join('', map {	my $v =$rq{$_};
+				if ($v =~/Logging:\s[^\r\n>]+->\s*([^\r\n\s]+)/) {
+					foreach my $f (glob($1 .$s->{-dirm} .'*.txt')) {
+						next if $f !~/-(?:run|go).txt$/i;
+						$v .=$s->strtime((stat($f))[10]) ." $f\n";
+						$v .=(eval{$s->fload('-',$f)}) ||'';
+					}
+				}
+				$v ."\n"
+				} sort {$rq{$a} cmp $rq{$b}} keys %rq)
+		};
+ }
+ elsif ($q1 =~/^err/) {
+	$q1=sub{if (/^\d{2,4}-\d\d-\d\d\s+\d\d:\d\d:\d\d\s+\[(\d+)\]/){
+			$id =$1;
+			if (/[\]:]\s+(?:End|Exit)\w*[\[:]/i) {
+				if (/\b(?:Error|Exit\w*:\s+[1-9]+|End\w*:\s+[1-9])\b/i) {
+					$_[1] =$rq{$id} .$_[1] if $rq{$id};
+					delete $rq{$id};
+					return($_[1])
+				}
+				else {
+					delete $rq{$id};
+					return('')
+				}
+				delete $rq{$id}
+			}
+			elsif (!$rq{$id}) {
+				$rq{$id} =$_
+			}
+			elsif (/[\]:]\s+(?:Start\w*)[\[:]/i) {
+				$rq{$id} =$_;
+			}
+			elsif (/[\]:]\s+(?:Logging)[\[:]/) {
+				$rq{$id} .=$_ if $rq{$id};
+			}
+		}
+		if (/\b(?:Error|CmdExcess|Exit\w*:\s+[1-9]+|Backlogs:\s+[1-9]+)\b/i) {
+			$_[1] =$rq{$id} .$_[1] if $id && $rq{$id} && $_[1] ne $rq{$id};
+			delete $rq{$id};
+			return($_[1])
+		} 0};
+ }
+ else {
+	my $q0 =$q1; $q0 =~s/\\/\\\\/g; $q0 =eval("sub{$q0}");
+	$q1=sub{if (/^\d{2,4}-\d\d-\d\d\s+\d\d:\d\d:\d\d\s+\[(\d+)\]/) {
+			$id =$1;
+			if (/[\]:]\s+(?:End|Exit)\w*[\[:]/i) {
+				if (&$q0(@_)) {
+					$_[1] =$rq{$id} .$_[1] if $rq{$id};
+					delete $rq{$id};
+					return($_[1])
+				}
+				else {
+					delete $rq{$id};
+					return('')
+				}
+			}
+			elsif (!$rq{$id}) {
+				$rq{$id} =$_
+			}
+			elsif (/[\]:]\s+(?:Start\w*)[\[:]/i) {
+				$rq{$id} =$_;
+			}
+			elsif (/[\]:]\s+(?:Logging)[\[:]/) {
+				$rq{$id} .=$_ if $rq{$id};
+			}
+		}
+		if (&$q0(@_)) {
+			$_[1] =$rq{$id} .$_[1] if $id && $rq{$id} && $_[1] ne $rq{$id};
+			delete $rq{$id};
+			return($_[1])
+		} 0};
+ }
+ if (!$ds) {}
+ elsif (($o =~/>/) && ($o !~/>=/)) {
+	while (defined($ll =readline($fh))) {
+		next	if $ll !~/^\d\d\d\d-\d\d-\d\d/;
+		last	if $ll gt $ds;
 	}
  }
- if (%pid) {
-	print "\n\nCmdStat: Echo Log: unclosed PIDs\n\n";
-	foreach my $id (sort {$pid{$a} cmp $pid{$b}} keys %pid) {
-		print $pid{$id};
+ else {
+	while (defined($ll =readline($fh))) {
+		next	if $ll !~/^\d\d\d\d-\d\d-\d\d/;
+		last	if $ll ge $ds;
 	}
  }
+ while (defined($ll)) {
+	last	if $ll !~/^\d\d\d\d-\d\d-\d\d\s/
+		? 0
+		: !$de || ($ll lt $de)
+		? 0
+		: ($o =~/</) && ($o !~/<=/)
+		? $ll gt $de
+		: 1;
+	$_ =$ll;
+	if (&$q1($s, $ll)) {
+		print $ll	if !$q2 && ($o =~/v/);
+		$rr .=$ll	if !$q2 && ($o =~/s/);
+	}
+	$ll =readline($fh);
+ }
+ if ($q2) {
+	my $r =&$q2($s, $rr);
+	print $r	if $o =~/v/;
+	$rr =$r		if $o =~/s/;
+ }
+ close($fh);
+ $rr
+}
+
+
+sub regask {		# Registrations query
+ my $s =shift;		# (-opt, start, end, on row, on end)
+			# >, >=, <, <=, 'v'erbose, 's'calar
+			# 'pid's, 'err'ors, 'dir's, 'all'
+ my $o =$_[0] && (($_[0] eq '-') || ($_[0] =~/^-[^\d]/i)) ? shift : '-v';
+ my $ds=$_[0] && ($_[0] =~/^[-\d]/) ? shift : undef;
+ my $de=$_[0] && ($_[0] =~/^[-\d]/) ? shift : undef;
+ my $q0=shift ||'dirs';
+ my $q1=$q0;
+ my $q2=shift;
+ my $rr='';
+ local $_;
+ $ds =	!$ds || ($ds =~/^\d\d\d\d-\d\d-\d\d/)
+	? $ds
+	: $ds =~/^-*(\d+)m/i
+	? $s->strtime(time() -$1 * 60)
+	: $ds =~/^-*(\d+)h/i
+	? $s->strtime(time() -$1 * 60 * 60)
+	: $ds =~/^-*(\d+)d/i
+	? $s->strtime(time() -$1 * 60 * 60 *24)
+	: $s->strtime(time() + eval($ds)||0);
+ $de =	!$de || ($de =~/^\d\d\d\d-\d\d-\d\d/)
+	? $de
+	: $de =~/^-*(\d+)m/i
+	? $s->strtime(time() -$1 * 60)
+	: $de =~/^-*(\d+)h/i
+	? $s->strtime(time() -$1 * 60 * 60)
+	: $de =~/^-*(\d+)d/i
+	? $s->strtime(time() -$1 * 60 * 60 *24)
+	: $s->strtime(time() + eval($de)||0);
+ if (ref($q1)) {}
+ elsif ($q1 =~/^all/i) {
+	$q1 =sub{1};
+ }
+ elsif ($q1 =~/^dir/i) {
+	$q1 =sub{1};
+ }
+ elsif ($q1 =~/^pid/i) {
+	$q1 =sub{/-(?:go|run)\.txt$/i};
+ }
+ elsif ($q1 =~/^err/i) {
+	$q1 =sub{/-(?:erg|err)\.txt$/i};
+ }
+ else {
+	$q1 =~s/\\/\\\\/g;
+	$q1 =eval("sub{$q1}");
+ }
+ local(*DIRB, *DIRK, *DIRC);
+ my $dirk=$s->{-dirb};
+ opendir(DIRB,$dirk)
+	||return($s->error($$,'','',"cannot open '$dirk': $!"));
+ foreach $dirk (sort {lc($a) cmp lc($b)} readdir(DIRB)) {
+	next if $dirk !~ /^log-/i;
+	my $dirr =$s->{-dirb} .$s->{-dirm} .$dirk;
+	next if !-d $dirr;
+	opendir(DIRK, $dirr)
+		||return($s->error($$,'','',"cannot open '$dirr': $!"));
+	while (defined($dirr =readdir(DIRK))) {
+		next if ($dirr eq '.') || ($dirr eq '..');
+		my $dirn =$s->{-dirb} .$s->{-dirm} .$dirk .$s->{-dirm} .$dirr;
+		next if !-d $dirn;
+		my @stat =stat($dirn);
+		next if $ds && ($s->strtime($stat[9]) lt $ds);
+		next if $de && ($s->strtime($stat[9]) gt $de);
+		if ($q0 =~/^dir/i) {
+			my $ll =$s->strtime($stat[9])
+				.' '
+				.$dirk .$s->{-dirm} .$dirr
+				."\n";
+			$rr .=$ll	if !$q2 && ($o =~/s/);
+			print $ll	if !$q2 && ($o =~/v/);
+			next
+		}
+		opendir(DIRC, $dirn)
+			||return($s->error($$,'','',"cannot open '$dirn': $!"));
+		while (defined($dirn =readdir(DIRC))) {
+		# foreach $dirn (sort {lc($a) cmp lc($b)} readdir(DIRC)) {
+			next if ($dirn eq '.') || ($dirn eq '..');
+			my $dirf =$s->{-dirb} .$s->{-dirm} .$dirk .$s->{-dirm} .$dirr .$s->{-dirm} .$dirn;
+			next if !&$q1($s, $rr, $dirk, $dirr, $dirn, $_ =$dirf);
+			@stat =stat($dirf);
+			my $ll =$s->strtime($stat[9])
+				.' '
+				.$dirk .$s->{-dirm} .$dirr .$s->{-dirm} .$dirn
+				."\n";
+			$rr .=$ll	if !$q2 && ($o =~/s/);
+			print $ll	if !$q2 && ($o =~/v/);
+		}
+		eval{close(DIRC)};
+	}
+	eval{close(DIRK)};
+ }
+ eval{close(DIRB)};
+ if ($q2) {
+	my $r =&$q2($s, $_ =$rr);
+	$rr =$r;
+	print $rr	if $o =~/v/;
+ }
+ $rr
 }
 
 
@@ -481,7 +764,7 @@ sub fstore {		# Store file
  my $s =shift;		# ('-b',filename, strings) -> success
  my $o =$_[0] =~/^-(?:\w[\w\d+-]*)*$/ ? shift : '-';
  my $f =$_[0]; $f ='>' .$f if $f !~/^[<>]/;
- local *FILE;  open(FILE, $f) || return($s->error("fstore: cannot open '$f': $!"));
+ local *FILE;  open(FILE, $f) || return($s->error($$,'','',"fstore: cannot open '$f': $!"));
  my $r =undef;
  if ($o =~/b/) {
 	binmode(FILE);
@@ -491,7 +774,7 @@ sub fstore {		# Store file
 	$r =print FILE join("\n",@_[1..$#_])
  }
  close(FILE);
- $r || $s->error("fstore: cannot write '$f': $!")
+ $r || $s->error($$,'','',"fstore: cannot write '$f': $!")
 }
 
 
@@ -502,12 +785,12 @@ sub fload {		# Load file
  my($f,$f0) =($_[0],$_[0]); 
 	if ($f =~/^[<>]+/)	{$f0 =$'}
 	else			{$f  ='<' .$f}
- local *FILE;  open(FILE, $f) || return($s->error("fload: cannot open '$f': $!"));
+ local *FILE;  open(FILE, $f) || return($s->error($$,'','',"fload: cannot open '$f': $!"));
  my $b =undef;
  binmode(FILE) if $o =~/b/;
  my $r =read(FILE,$b,-s $f0);
  close(FILE);
- defined($r) ? $b : $s->error("fload: cannot read '$f': $!")
+ defined($r) ? $b : $s->error($$,'','',"fload: cannot read '$f': $!")
 }
 
 
@@ -567,12 +850,12 @@ sub vload {   		# Load common variables
 	my $VAR1;
 	$s->{-var} =eval($bf);
 	!$lck && close($hf);
-	return($s->error("cannot load '$fn': $! $@"))
+	return($s->error($$,'','',"cannot load '$fn': $! $@"))
 		if !ref($s->{-var});
 	$s->{-varh}=$lck ? $hf : undef;
  }
  else {
-	return($s->error("cannot open '$fn': $!"))
+	return($s->error($$,'','',"cannot open '$fn': $!"))
  }
  $s->{-var}
 }
@@ -599,7 +882,7 @@ sub vstore {		# Store common variables
  }
  else {
 	$hf =IO::File->new('+>' .$fn)
-		|| return($s->error("cannot open '$fn': $!"));
+		|| return($s->error($$,'','',"cannot open '$fn': $!"));
 	flock($hf,LOCK_EX);
  }
  if ($hf) {
@@ -609,7 +892,7 @@ sub vstore {		# Store common variables
 	if ($ft) {$s->fstore($ft .'.tmp', $bf); rename($ft .'.tmp', $ft)};
 	sysseek($hf, 0, 0);
 	syswrite($hf,$bf) ne length($bf)
-	? return($s->error("cannot write '$fn': $!"))
+	? return($s->error($$,'','',"cannot write '$fn': $!"))
 	: 1;
 	truncate($hf,sysseek($hf, 0, 1));
 	flock($hf,LOCK_UN |LOCK_NB);
@@ -732,7 +1015,7 @@ sub cmid {		# New / get command subdirectory
 	if (@dir >$lim) {
 		for (my $i=$lim; $i<=$#dir; $i++) {
 			my $t =$lgd .$s->{-dirm} .$dir[$i];
-			$s->echo("Deleting:\t'$t'") if $s->{-echol} >1;
+			$s->echolog($$,'Deleting','',$t) if $s->{-echol} >1;
 			$^O eq 'MSWin32'
 			? system('cmd','/c','rmdir','/s','/q',$t)
 				# ? system('cmd','/c','del','/f','/s','/q',$t)
@@ -887,40 +1170,62 @@ sub execute {		# Execute command (target action) with current options
     $s->{-cid} =$s->{-cerr} =undef;
     $s->checkbase();
  my $esc =$s->{-esc} ||1; # internal cmd line escaping: 0 - off, 1 - on
- return $s->echologq()
+ return $s->logask('pids')
 	if ref($_[1]) && (($_[1]->[0] ||'') eq 'cmdstat') && ($#{$_[1]} ==0);
+ return $s->logask(@{$_[1]}[1..$#{$_[1]}])
+	if ref($_[1]) && (($_[1]->[0] ||'') eq 'logask');
+ return $s->regask(@{$_[1]}[1..$#{$_[1]}])
+	if ref($_[1]) && (($_[1]->[0] ||'') eq 'regask');
  if (!$s->{-cbranch} && !$s->{-cpause}) {
-	$s->echo("Starting:\t"
+	$s->{-runmod} ='Cmd';
+	&{$s->{-echol} >1 ? \&echolog : \&echowr}($s,$$
+		,"StartCmd",$ENV{SMPID}
 		, join(' '
-			, map { 
+			, map {
 				 ref($_) eq 'ARRAY'
 				? (map {$_ eq '-k0' 
-						? '-k' .$s->{-ckind} 
-						: ($s->qclad($_))
-						} @$_)
+					? '-k' .$s->{-ckind}
+					: $_ =~/^(-u[^:]*):/
+					? $1
+					: ($s->qclad($_))
+					} @$_)
+				: $_ =~/^(-u[^:]*)/
+				? ($s->qclad($1))
 				: ($s->qclad($_))
-				} @_[1..$#_])) 
-		if !$s->{-echol} ||($s->{-echol} >1)
+				} @_[1..$#_]));
  }
  elsif ($s->{-cpause} && !$s->{-cbranch}) {
 	$s->daemonize()	if $s->{-cloop} 
 			&& ($s->{-cloop} !~/[vw]/)
 			&& ($^O ne 'MSWin32');
-	$s->echo("StartLoop:\t" .$s->{-cloop} .'; '
-		, join(' ', $esc ? $s->qclauw(@ARGV) : $s->qclad(@ARGV)))
-		if !$s->{-echol} ||($s->{-echol} >1);
+	$ENV{SMPID} ='';
+	$s->{-runmod} ='Loop';
+	&{$s->{-echol} >1 ? \&echolog : \&echowr}($s,$$
+		,'StartLoop','', $s->{-cloop} .' # '
+		, join(' ', &{$esc ? \&qclauw : \&qclad}($s
+			,map {	$_ =~/^(-u[^:]*):/
+				? $1
+				: $_
+				} @ARGV
+			)));
 	eval{STDOUT->flush()};
 	sleep($s->{-cloop} =~/(\d+)/ ? $1 || (60*10) : (60*10))
  }
  elsif ($s->{-cbranch}) {
-	$s->echolog("StartBranch:\t" .$s->{-cbranch} .'; '
-		, join(' ', $esc ? $s->qclauw(@ARGV) : $s->qclad(@ARGV)));
+	$s->{-runmod} ='Branch';
+	$s->echowr($$,"StartBranch",$ENV{SMPID}, $s->{-cbranch} .' # '
+		, join(' ', &{$esc ? \&qclauw : \&qclad}($s
+			,map {	$_ =~/^(-u[^:]*):/
+				? $1
+				: $_
+				} @ARGV
+			)));
  }
 
  if ($s->{-reject}) {				# Check reject condition
 	my $r =eval{&{$s->{-reject}}($s)||''};
 	$r =$@ if !defined($r);
-	return($s->error("reject '$r'")) if $r;
+	return($s->error($$,'','',"reject '$r'")) if $r;
  }
 
  if (('cmdfile' eq lc($s->{-cline}->[0]||0))	# Command file processing
@@ -930,6 +1235,7 @@ sub execute {		# Execute command (target action) with current options
 		? [@$cmd[1..$#$cmd]]
 		: $cmd;
 	$s->{-cerr} =[];
+	$ENV{SMPID} =$$;
 	if ($cmd->[0] =~/\.(?:pl|p)$/) {
 		my $r =eval{	local $_ =$s;
 				local @ARGV =@$cmd[1..$#$cmd];
@@ -951,12 +1257,11 @@ sub execute {		# Execute command (target action) with current options
 				,($s->{-echo} ? ('-v' .$s->{-echo}) : ())
 				,$_);
 			local $s->{-echol} =$s->{-echo} =~/c/ ? $s->{-echol} ||1 : $s->{-echol};
-			$s->echo("CmdPick:\t", join(' ', @arg) ,' (', $cmd->[0],')')
+			$s->echolog($$,'CmdPick', '', join(' ', @arg) ,' (', $cmd->[0],')')
 				if $s->{-echo} =~/c/;
 			$s->fstore('-',	'>>' .$_[1]
-				, ($s->{-echo} =~/t/ ? ($s->strtime() .' ') : '')
-				. '$$' .$$ .' '
-				. "CmdPick:\t"
+				, $s->strtime() ." [$$]: "
+				. "CmdPick: "
 				. join(' ', @arg)
 				. "\n")
 				if $_[1];
@@ -964,16 +1269,24 @@ sub execute {		# Execute command (target action) with current options
 				# cmdfile direct parsing is difficult due to
 				#	loops and command string parsing.
 				$e +=$?>>8 ? 1 : 0;
-				$s->echo("CmdExit:\t", ($?>>8), ' (' .join(' ', @arg) .')')
+				$s->echolog($$,'CmdExit', '', ($?>>8), ' (' .join(' ', @arg) .')')
 					if $s->{-echo} =~/c/;
 			}
 			else {
 				$e +=1;
-				return($s->error("$! (" .join(' ', @arg) .')'))
+				$s->echolog($$,'Error','',$!,' # ',join(' ', @arg));
+				die("Error: $! # " .join(' ', @arg));
+				return(undef)
 			}
 			}, @$cmd);
-		$s->echo("CmdExcess:\t ", $s->{-cmdfile}->{-retexc},'(',@$cmd,')')
-			if $s->{-cmdfile}->{-retexc};
+
+		$s->vgxf('l') if $e && $s->{-vgxf} && $s->{-vgxi};
+		$s->echolog($$
+			, $s->{-cmdfile}->{-retexc}
+			? ("CmdExcess", '', $s->{-cmdfile}->{-retexc},' # ',join(' ','cmdfile',@$cmd))
+			: ("Backlogs", '', $e||'Ok'
+				#, ($s->{-vgxv} && scalar(%{$s->{-vgxv}}) ? ', skipped: ' .join(', ', sort keys %{$s->{-vgxv}}) : ())
+				," # ",join(' ', 'cmdfile', @$cmd)));
 		$s->{-cerr}->[0] =$e if $e;
 		return(!$e && $r);
 	}
@@ -988,17 +1301,17 @@ sub execute {		# Execute command (target action) with current options
 				: ()
 				} @$target]
 	}
-	return($s->error("no command target")) if !@$target;
- $s->echo("Targets:\t" 
+	return($s->error($$,'','',"no command target")) if !@$target;
+ $s->echolog($$,'Targets','' 
 	,(ref($s->{-ctarget}) 
 		? join(', ', @{$s->{-ctarget}}) 
 		: $s->{-ctarget} ), " -> "
 	,join(", ", @$target))
 	if !$s->{-cbranch} && !$s->{-cpause} 
-	&& (!$s->{-echol} ||($s->{-echol} >1));
+	&& ($s->{-echol} >1);
 
  my $cmd  =[@{$s->{-cline}}];			# Tune Command line
-	return($s->error("no command line")) if !$cmd->[0];
+	return($s->error($$,'','',"no command line")) if !$cmd->[0];
 	foreach my $k (qw(lcmd rdo ldo fput fget mput mget)) {
 		$s->{-assoc}->{$k}=$s->{-assoc}->{'rcmd'}
 	}
@@ -1018,24 +1331,24 @@ sub execute {		# Execute command (target action) with current options
 			? scalar(Win32::GetFullPathName('.'))
 			: '.';
 	}
- $s->echo("Command:\t"
+ $s->echolog($$,'Command',''
 	,join(' ', $s->qclad(@{$s->{-cline}})), " -> "
 	,join(' ', $s->qclad(@$cmd)))
 	if !$s->{-cbranch} && !$s->{-cpause} 
-	&& (!$s->{-echol} ||($s->{-echol} >1));
+	&& ($s->{-echol} >1);
 
  eval('use Sys::Manage::CmdEscort; 1')		# Set Command Environment
-	|| return($s->error("no Sys::Manage::CmdEscort"));
+	|| return($s->error($$,'','',"no Sys::Manage::CmdEscort"));
  $s->vgxf('l') if $s->{-vgxf};
  my $cid =$s->{-cid} =$s->cmid();
  my $dir =$s->{-dirb} .$s->{-dirm} .'log-' .$s->{-ckind};
     mkdir($dir,0777) if !-d $dir;
     $dir =$dir .$s->{-dirm} .$cid;
     mkdir($dir,0777) if !-d $dir;
- $s->echo("Logging:\t" 
+ &{$s->{-echol} >1 ? \&echolog : \&echowr}($s, $$
+ 	,'Logging',''
 	,"$cid -> $dir")
-	if !$s->{-cbranch} && !$s->{-cpause} 
-	&& (!$s->{-echol} ||($s->{-echol} >1));
+	if !$s->{-cbranch};
 
  my $cms =$target;				# Branch Command
  my $order =$s->{-corder};
@@ -1074,15 +1387,15 @@ sub execute {		# Execute command (target action) with current options
 			,($s->{-echo} ? ('-v' .$s->{-echo}) : ())
 			,($esc ? '-esc' : ())
 			);
-		$s->echo("Branching:\t"
+		$s->echolog($$,'Branching',''
 			,join(' ', $s->qclad(@arg,@{$s->{-cline}}))) 
-			if !$s->{-echol} ||($s->{-echol} >1);
+			if $s->{-echol} >1;
 		(system(1, $s->qclad($^X)
 			, ($0 =~/\.(?:bat|cmd)$/i ? ('-x') : ())
 			, $s->qclad(@arg)
 			, $esc ? $s->qclae(@{$s->{-cline}}) : $s->qclad(@{$s->{-cline}})
 			) == -1)
-		&& return($s->error("system(Branching) -> $!"));
+		&& return($s->error($$,'','',"system(Branching) -> $!"));
 	}
 	$order ='s' if scalar(@brtgt) && !$brcnt;
 	if (!scalar(@brtgt)) {
@@ -1095,8 +1408,8 @@ sub execute {		# Execute command (target action) with current options
 	$target =$cms if $s->{-cbranch};
  }
  else {
- 	$ENV{SMPID} =$$;
- }	
+	$ENV{SMPID} =$$;
+ }
 
  foreach my $e (@$cms) {			# Execute Commands on Targets
 	my $fn =$dir .$s->{-dirm} .$e;
@@ -1116,9 +1429,10 @@ sub execute {		# Execute command (target action) with current options
 	}
 	if ($s->{-ping}) {		# pinging
 		$s->fstore("${fn}-go.txt"
-			,join("\t",$s->strtime()
-				,'[' .($ENV{SMPID}||$$) .",$$]"
+			,join(" ", $s->strtime()
+				,"[$$]"
 				,$s->class().'::ping'
+				.($ENV{SMPID} && ($ENV{SMPID} ne $$) ? "[$ENV{SMPID}]:" : ':')
 				,map {defined($s->{$_})
 					? ($_ .'=' .$s->{$_})
 					: ($_ .'=undef')
@@ -1127,7 +1441,7 @@ sub execute {		# Execute command (target action) with current options
 		my $r =$s->ping($e);
 		if (!defined($r)) {
 			rename("${fn}-go.txt", "${fn}-erg.txt")
-			||return($s->error("rename(", "${fn}-go.txt"
+			||return($s->error($$,'','',"rename(", "${fn}-go.txt"
 				,",", "${fn}-erg.txt", ") -> $!"));
 			next
 		}
@@ -1182,18 +1496,20 @@ sub execute {		# Execute command (target action) with current options
 	$s->{-logevt} && &{$s->{-logevt}}($s, $fn, $cme, '');
 
 	if ($order =~/[s]/) {	# start types
-		$s->{-log} && $s->echolog("$fn = ",join(' ', $s->qclad(@$cme)));
+		# $s->echowr($$,'','',"$fn = ",join(' ', $s->qclad(@$cme)));
 		eval{Sys::Manage::CmdEscort::CmdEscort([$fn, @$cme]
 		,-i=>$s->{-cignor}
 		,-v=>$s->{-echol} .($s->{-echo} =~/([t])/ ? $1 : '')); 1}
-		;#||warn("Error: Sys::Manage::CmdEscort::CmdEscort: $@\n");
+		#||$s->echowr($$,'Error','',"eval(Sys::Manage::CmdEscort::CmdEscort) -> $@\n")
+		||return($s->error($$,'','',"system(Sys::Manage::CmdEscort::CmdEscort) -> $!"))
 	}
 	if ($order =~/[b]/) {
-		$s->{-log} && $s->echolog("$fn = ",join(' ', $s->qclad(@$cme)));
+		$ENV{SMPID} =$$;
 		eval{Sys::Manage::CmdEscort::CmdEscort([$fn, @$cme]
 		,-i=>$s->{-cignor}
 		,-v=>$s->{-echol} .($s->{-echo} =~/([t])/ ? $1 : '') .'c'); 1}
-		;#||warn("Error: Sys::Manage::CmdEscort::CmdEscort: $@\n");
+		#||$s->echowr($$,'Error','',"eval(Sys::Manage::CmdEscort::CmdEscort) -> $@\n")
+		||return($s->error($$,'','',"system(Sys::Manage::CmdEscort::CmdEscort) -> $!"))
 	}
 	elsif ($order =~/[c]/) {
 		$ENV{SMPID} =$$;
@@ -1207,8 +1523,8 @@ sub execute {		# Execute command (target action) with current options
 			,$s->qclat($fn)
 			,$esc ? $s->qclae(@$cme) : $s->qclat(@$cme)
 			);
-		$s->{-log} && $s->echolog("\$\$$pid, $fn = ",join(' ', $s->qclad(@$cme)));
-		return($s->error("system(CmdEscort) -> $!")) if $pid ==-1;
+		return($s->error($$,'','',"system(CmdEscort) -> $!"))
+			if $pid ==-1;
 	}
  }
 
@@ -1246,10 +1562,11 @@ sub execute {		# Execute command (target action) with current options
 		}
 		elsif ($s->{-vgxv} && $s->{-vgxv}->{$e}) {
 			$s->fstore("${fn}-erg.txt"
-				,join("\t",$s->strtime()
-				,'[' .($ENV{SMPID}||$$) .",$$]"
+				,join(" ",$s->strtime()
+				,"[$$]"
 				,$s->class() .'::gx'
-				,'continued'), "\n")
+				.($ENV{SMPID} && ($ENV{SMPID} ne $$) ? "[$ENV{SMPID}]:" : ':')
+				,'skiped/excluded formerly'), "\n")
 		}
 		else {
 			$errc->[2]	 =($errc->[2]||0) +1;
@@ -1262,15 +1579,21 @@ sub execute {		# Execute command (target action) with current options
  if (@$errc) {
 	$s->{-cerr} =$errc;
 	$s->vgxf('s') if $s->{-vgxf} && !$s->{-cpause};
-	$s->echo("Backlogs:\t"
+	$s->echolog($$,'Backlogs',''
 		, join(', '
 		, ($errc->[0] ? $errc->[0] .' exited'	: ())
 		, ($errc->[1] ? $errc->[1] .' running'	: ())
-		, ($errc->[2] ? $errc->[2] .' missed'	: ())))
+		, ($errc->[2] ? $errc->[2] .' missed'	: ())
+		#, (($s->{-vgxi}||($s->{-echol}>1)) && $s->{-vgxv} && scalar(%{$s->{-vgxv}}) ? 'skipped: ' .join(', ', sort keys %{$s->{-vgxv}}) : ())
+		))
  }
  else {
 	$s->{-cerr} =undef;
-	$s->echo("Backlogs:\tOk") if !$s->{-cbranch};
+	$s->echolog($$,'Backlogs',''
+		,join(', ', 'Ok'
+		#, (($s->{-vgxi}||($s->{-echol}>1)) && $s->{-vgxv} && scalar(%{$s->{-vgxv}}) ? 'skipped: ' .join(', ', sort keys %{$s->{-vgxv}}) : ())
+		))
+		if !$s->{-cbranch};
  }
  if ($s->{-cloop} && $errl) {			# Loop rerun
 	my @arg =($0
@@ -1286,8 +1609,8 @@ sub execute {		# Execute command (target action) with current options
 		,($s->{-echo} ? ('-v' .$s->{-echo}) : ())
 		,($esc ? '-esc' : ())
 		);
-	$s->echo("Looping:\t", join(' ', $s->qclad(@arg,@{$s->{-cline}})))
-		if !$s->{-echol} ||($s->{-echol} >1);
+	$s->echolog($$,'Looping','', join(' ', $s->qclad(@arg,@{$s->{-cline}})))
+		if $s->{-echol} >1;
 	if (($^O eq 'MSWin32') && ($s->{-cloop} !~/v/)) {
 		eval('use Win32::Process');
 		Win32::Process::Create($Win32::Process::Create::ProcessObj
@@ -1302,7 +1625,7 @@ sub execute {		# Execute command (target action) with current options
 			, ($s->{-cloop} =~/w/) || 1
 			? &CREATE_NEW_CONSOLE : &CREATE_NEW_PROCESS_GROUP
 			, '.')
-		|| return($s->error("system(Looping) -> $!"));
+		|| return($s->error($$,'','',"system(Looping) -> $!"));
 			# ??? IPC::Open3 fails with DETACHED_PROCESS;
 			# use CREATE_NEW_CONSOLE better CREATE_NEW_PROCESS_GROUP
 			# with 'daemonize' also.
@@ -1314,7 +1637,7 @@ sub execute {		# Execute command (target action) with current options
 			, $s->qclat(@arg)
 			, $esc ? $s->qclae(@{$s->{-cline}}) : $s->qclat(@{$s->{-cline}})
 			) ==-1)
-		&& return($s->error("system(Looping) -> $!"));
+		&& return($s->error($$,'','',"system(Looping) -> $!"));
 	}
  }
  !$s->{-cerr}

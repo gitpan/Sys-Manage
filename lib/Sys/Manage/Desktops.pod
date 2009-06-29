@@ -411,7 +411,8 @@ Text database format:
 
 	# comment row
 	...
-	-hostdom=>'all' | 'domainName'		# domain for rows below
+	-hostdom=>'all' | 'domain' | /regexp/	# domain for rows below
+	-domain=>'all' | 'domain' | /regexp/
 	...
 	-dhn=>['node name','group name',...]	# node groups
 	...
@@ -434,6 +435,14 @@ Domain of the user current, see also C<-user>.
 	=> 0 | 1 | sub{}
 
 Error handler on $SIG{__DIE__}.
+
+
+=item -echof
+
+	=> not exist | 1 | file handle
+
+Switch/handle of additional log file to fill with C<echo>.
+Related to C<-dirmls>/C<-dirmlu>.
 
 
 =item -host
@@ -531,6 +540,10 @@ See also C<-lang>, C<-banner>.
 
 	=> is admin user?
 
+=item -ucon
+
+	=> is console user?
+
 =item -usystem
 
 	=> is system user?
@@ -603,15 +616,18 @@ More preferred is using C<-nodes>, C<-users>, C<-doid>, C<-doop>.
 	=> empty | command line | ?! command line
 
 Command line to be executed to apply assignment.
-
 Optional starting char may be used to interpret exit code:
 '?' - success if 0, 
 '!' - success if not 0.
 Default operation ignores exit code.
 
-Embedded 'do perl-script-file' comand evaluates file given as sub{}(self, assignment).
+Embedded 'do perl-script-file' and 'eval perl-script' commands evaluate file or string given with L<Sys::Manage::Cmd|Sys/Manage/Cmd> object in $_.
 Some of C<Methods> may be called.
-Empty result will be considered as faiure.
+Optional starting char:
+'?' - success if true, 
+'!' - success if false,
+'@' - failure if die.
+Default operation ignores return value.
 
 
 
@@ -709,7 +725,7 @@ This item is very platform dependent, see C<Limitations, Bugs, Problems>.
 	=> empty | 'none' | 'name' | [name,...]
 
 On which nodes (computers) assignment should be executed (except C<-xnodes>).
-May be used group names from C<-dhn>.
+May be used simple names, Windows and DNS domain names, group names from C<-dhn>.
 Empty value means all nodes; 'none' value allows execution only via C<-doid> or C<-doop>.
 
 
@@ -720,6 +736,14 @@ Empty value means all nodes; 'none' value allows execution only via C<-doid> or 
 
 Date-time since assignment should be executed.
 
+
+=item -uadmin
+
+=item -ucon
+
+	=> empty | true | false
+
+C<-uadmin> and C<-ucon> C<Script Configuration> values required to execute assignment.
 
 
 =item -under
@@ -739,7 +763,7 @@ See also C<Run Modes>, C<Assignment Modes>.
 	=> empty | 'none' | 'name' | [name,...]
 
 For which users assignment should be executed (except C<-xusers>).
-May be used group names from C<-dhu>.
+May be used simple names, Windows and DNS domain names, group names from C<-dhu>.
 Empty value means all users; 'none' value allows execution only via C<-doid> or C<-doop>.
 
 
@@ -1070,6 +1094,15 @@ C<w32umnu>('', sub{}) unlinks items found by C<ffind>, but not mentioned.
 Additional options may be 'i'gnore errors and 'v'erbose.
 
 
+
+=item w32ver () -> [Win32::GetOSVersion]
+
+=item w32ver (index) -> Win32::GetOSVersion(index)
+
+L<Win32::GetOSVersion|Win32/GetOSVersion> cached.
+
+
+
 =item w32wmiq (class | query) -> SWbemObjectSet
 
 =item w32wmiqf (class | query) -> first object
@@ -1196,6 +1229,35 @@ See also at the top of the source code.
 =head1 VERSION
 
 =over
+
+
+=item '2009-04-22'
+
+New C<-uadmin> and C<-ucon> C<Assignment Parameters>.
+Changed C<-do> => 'do perl-script-file' to be alike C<frun>.
+New C<-do> => 'eval perl-script'.
+
+
+=item '2009-04-14'
+
+Defaults of C<nnames>() and C<unames>() extended with C<-host> and C<-hostdom>.
+C<-hostdom> and C<-domain> in the C<-dla> text file may be /regexps/.
+
+
+=item '2009-03-20'
+
+New C<-echof>.
+
+Extended internal usage of C<echo>().
+
+C<-host> may be L<Win32::NodeName|Win32> if not L<Sys::Hostname::hostname|Sys/Hostname>.
+
+Improved error messages from C<fpthmk>().
+
+
+=item '2009-03-02'
+
+New C<w32ver>(), corrections for Windows NT.
 
 
 =item '2008-08-12'

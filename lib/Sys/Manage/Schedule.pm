@@ -5,6 +5,7 @@
 # makarow, 2005-09-15
 #
 # !!! see in source code
+# ??? run() parsing 'stdout'/'stderr'?
 # ??? qclad(@_) inside 'cmdfck'?
 # !!! 'soon' multiplatform
 # !!! 'chpswd' may fail?
@@ -18,7 +19,7 @@ use strict;
 use Carp;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.61';
+$VERSION = '0.62';
 
 1;
 
@@ -52,7 +53,7 @@ sub initialize {	# Initialize newly created object
 			: '.'}
 	,-dirv		=>''			# directory for vars & logs, below
 	,-logmax	=>1024*1024*2		# log file size
-	,-logpid	=>1			# log pid file switch / name
+	,-autoflush	=>1			# autoflush
 	,-prgfn		=>do{$^O eq 'MSWin32'	# program full name
 			? scalar(Win32::GetFullPathName($0)) ||$0
 			: $0}
@@ -102,10 +103,10 @@ sub class {
 sub daemonize {		# Daemonize process
  my $s =$_[0];
  my $null =$^O eq 'MSWin32' ? 'nul' : '/dev/null';
- open(STDIN,  "$null")  || return($s->echologdie("daemonize(STDIN) -> $!")); 
- open(STDOUT,">$null")  || return($s->echologdie("daemonize(STDOUT) -> $!"));
+ open(STDIN,  "$null")  || return($s->error(0,'',"daemonize(STDIN) -> $!")); 
+ open(STDOUT,">$null")  || return($s->error(0,'',"daemonize(STDOUT) -> $!"));
  eval("use POSIX 'setsid'; setsid()");
- open(STDERR,'>&STDOUT')|| return($s->echologdie("daemonize(STDERR) -> $!"));
+ open(STDERR,'>&STDOUT')|| return($s->error(0,'',"daemonize(STDERR) -> $!"));
  $s
 }
 
@@ -116,12 +117,9 @@ sub DESTROY {
 	$s->vfwrite('>crontab.txt',@{$s->{-crontab}});
 	$s->run('crontab',$s->vfname('crontab.txt'));
  }
-
- if ($s->{-logpid} && (length($s->{-logpid}) >1)) {
-	if (!unlink($s->{-logpid})) {
-		$s->echolog(join(' ', map {$_ ? ($_) : ()} 'unlink',$s->{-logpid},$!,$^E));
-	}
-	eval{$s->logrdr(undef)} if $s->{-wrlog};
+ if (($s->{-runmod} && ($s->{-runmod} !~/^-*logask/))
+ && ($s->{-wrlog} || $s->logrdr(0))) {
+	$s->echowr($$,'EndSched','',$?, ' # ', join(' ',$s->{-runmod}||0, $s->{-runarg}||0));
  }
  $s
 }
@@ -152,7 +150,7 @@ sub max {		# Max number
 
 
 sub strtime {		# Log time formatter
-	my @t =localtime();
+	my @t =$_[1] ? localtime($_[1]) : localtime();
 	 join('-', $t[5]+1900, map {length($_)<2 ? "0$_" : $_} $t[4]+1,$t[3]) 
 	.' ' 
 	.join(':', map {length($_)<2 ? "0$_" : $_} $t[2],$t[1],$t[0])
@@ -195,52 +193,89 @@ sub qclad {		# Quote command line arg(s) on demand
 }
 
 
-sub printflush {	# Print STDOUT with autoflush
- my $s =$_[0];		# (print args) -> print result
+sub qclae {		# Escape command line arg(s)
+ 	map {	my $v =defined($_) ? $_ : '';
+		$v =~s/([^a-zA-Z0-9])/uc sprintf('_%02x',ord($1))/eg;
+		$v
+		} @_[1..$#_]
+}
+
+
+sub qclau {	# UnEscape command line arg(s)
+ 	map {	my $v =defined($_) ? $_ : '';
+		$v =~s/_([0-9a-fA-F]{2})/chr hex($1)/ge;
+		$v
+		} @_[1..$#_]
+}
+
+
+sub autoflush {		# set autoflush
+ my $s =$_[0];
+ return($s->{-autoflush}) if !defined($_[1]);
  my @f =(select(), do{select(STDERR); $|}, do{select(STDOUT); $|});
- select(STDERR); $|=1;
- select(STDOUT); $|=1;
- my $r =print(@_[1..$#_]);
- select(STDERR); $|=$f[1];
- select(STDOUT); $|=$f[2];
+ select(STDERR); $|=$s->{-autoflush};
+ select(STDOUT); $|=$s->{-autoflush};
+ $s->{-wrlog}->autoflush($s->{-autoflush}) if $s->{-wrlog};
  select($f[0]);
- $r
-}
-
-
-sub echolog {		# Echo + log
- my $s=shift;		# (message)
- $s->printflush(@_,"\n");
- $s->{-wrlog} && $s->{-wrlog}->print($s->strtime(),' ',@_,"\n") 
-	&& $s->{-wrlog}->flush();
-}
-
-
-sub echologdie {	# Echo + log + die
- my $s=shift;		# (message)
- $s->{-wrlog} && $s->{-wrlog}->print($s->strtime(),' ',@_,"\n") 
-	&& $s->{-wrlog}->flush();
- croak(join('',@_) ."\n")
-}
-
-
-sub echologwarn {	# Echo + log + die
- my $s=shift;		# (message)
- $s->{-wrlog} && $s->{-wrlog}->print($s->strtime(),' ',@_,"\n") 
-	&& $s->{-wrlog}->flush();
- carp(join('',@_) ."\n")
 }
 
 
 sub flush {		# Flush STDOUT/STDERR
- eval('use IO::File; STDOUT->flush(); STDERR->flush()')
+ eval('use IO::File; STDOUT->flush(); STDERR->flush()');
+ $_[0]->{-wrlog} && $_[0]->{-wrlog}->flush();
+ 1
+}
+
+
+sub echomap {		# Map echo args to print/write
+ return(('[', $_[1]||$$, ']: '
+	, $_[2] ||''
+	, $_[3] && ($_[3] =~/^\d+$/) ? ('[', $_[3], ']: ') : $_[2] ? (': ', $_[3]) : ($_[3])
+	, @_[4..$#_]
+	))
+}
+
+
+sub echo {		# Echo to stdout
+	print(!$#_ ? () : echomap(@_), "\n")
+}
+
+
+sub echowr {		# Echo to log
+ $_[0]->{-wrlog} && $_[0]->{-wrlog}->print(
+	!$#_ ? () : (strtime($_[0]),' ', echomap(@_)),"\n")
+}
+
+
+sub echowrf {		# Echo to log force
+ return(echowr(@_)) if $_[0]->{-wrlog};
+ mkdir($_[0]->{-dirv},0777) if !-e $_[0]->{-dirv};
+ $_[0]->vfwrite('>>log.txt', "\n", join('',strtime($_[0]), ' ', echomap(@_)))
+}
+
+
+sub echolog {		# Echo + log
+ echo(@_); echowr(@_)
+}
+
+
+sub warning {		# Echo Warning
+ my @a =($_[0], $_[1]||$$, $_[2] ||'Warning', @_[3..$#_]);
+ echowrf(@a); carp(join('', echomap(@a)) ."\n")
+}
+
+
+sub error {		# Error finish
+ my @a =($_[0], $_[1]||$$, $_[2] ||'Error', @_[3..$#_]);
+ echowrf(@a);
+ croak(join('', echomap(@a)) ."\n")
 }
 
 
 sub fopen {		# File open
  my ($s,$f) =@_;	# (file name) -> file handle
  eval('use IO::File');
- IO::File->new($f) || $s->echologdie("Error '$!' (fopen,'$f')");
+ IO::File->new($f) || $s->error(0,'',"fopen('$f') -> $!");
 }
 
 
@@ -281,7 +316,7 @@ sub fread {		# Load file
  my $b =undef;
  my $r =$fh->read($b,-s $f0);
  eval{$fh->close()};
- defined($r) ? $b : $s->echologdie("Error '$!' (fread,'$fn')")
+ defined($r) ? $b : $s->error("fread('$fn') -> $!")
 }
 
 
@@ -357,7 +392,10 @@ sub logrdr {	# Log output redirector
  }
  elsif ($_[1] && !$s->{-wrout}) {
 	$s->flush();
-	$s->{-wrlog} =$s->vfopen('>>log.txt') if !$s->{-wrlog};
+	if (!$s->{-wrlog}) {
+		$s->{-wrlog} =$s->vfopen('>>log.txt');
+		$s->autoflush(1) if $s->{-autoflush};
+	}
 	$s->{-wrout} =eval('use IO::File; IO::File->new(">&STDOUT")');
 	$s->{-wrerr} =eval('use IO::File; IO::File->new(">&STDERR")');
 	open(STDERR, '>&STDOUT');
@@ -372,7 +410,8 @@ sub logrdr {	# Log output redirector
 	delete $s->{-wrout};	delete $s->{-wrerr};
  }
  elsif (!$_[1] && defined($_[1]) && !$s->{-wrlog}) {
-	$s->{-wrlog} =$s->vfopen('>>log.txt')
+	$s->{-wrlog} =$s->vfopen('>>log.txt');
+	$s->autoflush(1) if $s->{-autoflush};
  }
  if (!defined($_[1]) && $s->{-wrlog}) {
 	$s->{-wrlog}->close();	delete $s->{-wrlog}
@@ -384,7 +423,10 @@ sub logrdr {	# Log output redirector
 sub loglck {	# Lock operation
  my ($s,$l,$t) =@_;	# (true|false|undef, ?nonblock) -> success
  $t =($t ? '| LOCK_NB' : '');
- $s->{-wrlck} =$s->vfopen('>lck.txt') if !$s->{-wrlck};
+ $s->{-wrlck} =$s->vfopen('>lck.txt')
+	if !$s->{-wrlck};
+ eval{$s->{-wrlog}->flush()}
+	if $s->{-wrlog} && defined($l) && $#_;
  my $r =flock($s->{-wrlck}
 		, !$l	
 		? eval("use Fcntl qw(:flock); LOCK_UN $t")
@@ -403,6 +445,8 @@ sub loglcs {	# Lock operation for su / soon
  my ($s,$l,$t) =@_;	# (true|false|undef, ?nonblock) -> success
  $t =($t ? '| LOCK_NB' : '');
  $s->{-wrlcs} =$s->vfopen('>lcs.txt') if !$s->{-wrlcs};
+ eval{$s->{-wrlog}->flush()}
+	if $s->{-wrlog} && defined($l) && $#_;
  my $r =flock($s->{-wrlcs}
 		, !$l	
 		? eval("use Fcntl qw(:flock); LOCK_UN $t")
@@ -415,6 +459,165 @@ sub loglcs {	# Lock operation for su / soon
  }
  $r;
 }
+
+
+sub logask {		# Echo log query
+ my $s =shift;		# (-opt, start, end, on row, on end)
+			# >, >=, <, <=, 'v'erbose, 's'calar
+			# 'pid's, 'err'ors, 'all'
+ my $o =$_[0] && (($_[0] eq '-') || ($_[0] =~/^-[^\d]/i)) ? shift : '-v';
+ my $ds=$_[0] && ($_[0] =~/^[-\d]/) ? shift : undef;
+ my $de=$_[0] && ($_[0] =~/^[-\d]/) ? shift : undef;
+ my $q0=shift ||'all';
+ my $q1= $q0;
+ my $q2= shift;
+ my $ll='';
+ my $rr='';
+ my ($id, %rq, $rq);
+ local $_;
+ my $fh =$s->vfopen('<log.txt');
+ $ds =	!$ds || ($ds =~/^\d\d\d\d-\d\d-\d\d/)
+	? $ds
+	: $ds =~/^-*(\d+)m/i
+	? $s->strtime(time() -$1 * 60)
+	: $ds =~/^-*(\d+)h/i
+	? $s->strtime(time() -$1 * 60 * 60)
+	: $ds =~/^-*(\d+)d/i
+	? $s->strtime(time() -$1 * 60 * 60 *24)
+	: $s->strtime(time() + eval($ds)||0);
+ $de =	!$de || ($de =~/^\d\d\d\d-\d\d-\d\d/)
+	? $de
+	: $de =~/^-*(\d+)m/i
+	? $s->strtime(time() -$1 * 60)
+	: $de =~/^-*(\d+)h/i
+	? $s->strtime(time() -$1 * 60 * 60)
+	: $de =~/^-*(\d+)d/i
+	? $s->strtime(time() -$1 * 60 * 60 *24)
+	: $s->strtime(time() + eval($de)||0);
+ if (ref($q1)) {}
+ elsif ($q1 =~/^all/i) {
+	$q1 =sub{1}
+ }
+ elsif ($q1 =~/^pid/i) {
+	$rq=$^O eq 'MSWin32' ? (`tlist 2>nul` ||`tasklist 2>nul` || '') : `ps 2>nul`;
+ 	$q1=sub{if (/^\d{2,4}-\d\d-\d\d\s+\d\d:\d\d:\d\d\s+\[(\d+)\]/){
+			my $id =$1;
+			if (/[\]:]\s+(?:End\w*|EndSched|Exit\w*)[\[:]/i) {
+				delete $rq{$id};
+			}
+			elsif ($rq !~/\b\Q$id\E\b/) {
+			}
+			elsif (!$rq{$id}
+			||	(/[\]:]\s+(?:Start|StartSched)[\[:]/i)) {
+				$rq{$id} =$_;
+			}
+			elsif (/[\]:]\s+(?:Start\w*)[\[:]/i) {
+				$rq{$id} =$_ if !$rq{$id}
+			}
+			elsif (length($rq{$id}) <3*1024) {
+				$rq{$id} .=$_;
+				$rq{$id} .="...\n" if length($rq{$id}) >=3*1024;
+			}
+		}; ''};
+	$q2=	sub{join('', map {	$rq{$_} ."\n"
+				} sort {$rq{$a} cmp $rq{$b}} keys %rq)
+		};
+ }
+ elsif ($q1 =~/^err/) {
+	$q1=sub{if (/^\d{2,4}-\d\d-\d\d\s+\d\d:\d\d:\d\d\s+\[(\d+)\]/) {
+			$id =$1;
+			if (/[\]:]\s+(?:End\w*|EndSched|Exit\w*)[\[:]/i) {
+				if ((/\b(?:end|endsched|exit)[:\s]+[1-9]+\b/i)
+				||  (/\b(?:error)\b/i)) {
+					$_[1] =$rq{$id} .$_[1] if $id && defined($rq{$id}) && ($_[1] ne $rq{$id});
+					delete $rq{$id}; $id ='';
+					return($_[1])
+				}
+				else {
+					delete $rq{$id}; $id ='';
+					return(0)
+				}
+			}
+			elsif (!$rq{$id}
+			||	(/[\]:]\s+(?:Start|StartSched)[\[:]/i)) {
+				$rq{$id} =$_;
+			}
+			elsif (/[\]:]\s+(?:Start\w*)[\[:]/i) {
+				$rq{$id} =$_ if !$rq{$id}
+			}
+
+		}
+		if ((/\b(?:end|endsched|exit)[:\s]+[1-9]+\b/i)
+		||  (/\b(?:error)\b/i)) {
+			$_[1] =$rq{$id} .$_[1] if $id && ($_[1] ne $rq{$id});
+			return($_[1])
+		} 0};
+ }
+ else {
+	my $q0 =$q1; $q0 =~s/\\/\\\\/g; $q0 =eval("sub{$q0}");
+	$q1=sub{if (/^\d{2,4}-\d\d-\d\d\s+\d\d:\d\d:\d\d\s+\[(\d+)\]/) {
+			$id =$1;
+			if (/[\]:]\s+(?:End\w*|EndSched|Exit\w*)[\[:]/i) {
+				if (&$q0(@_)) {
+					$_[1] =$rq{$id} .$_[1] if $id && defined($rq{$id}) && ($_[1] ne $rq{$id});
+					delete $rq{$id}; $id ='';
+					return($_[1])
+				}
+				else {
+					delete $rq{$id}; $id ='';
+					return(0)
+				}
+			}
+			elsif (!$rq{$id}
+			||	(/[\]:]\s+(?:Start|StartSched)[\[:]/i)) {
+				$rq{$id} =$_
+			}
+			elsif (/[\]:]\s+(?:Start\w*)[\[:]/i) {
+				$rq{$id} =$_ if !$rq{$id}
+			}
+		}
+		if (&$q0(@_)) {
+			$_[1] =$rq{$id} .$_[1] if $id && ($_[1] ne $rq{$id});
+			return($_[1])
+		} 0};
+ }
+ if (!$ds) {}
+ elsif (($o =~/>/) && ($o !~/>=/)) {
+	while (defined($ll =readline($fh))) {
+		next	if $ll !~/^\d{2,4}-\d\d-\d\d/;
+		last	if $ll gt $ds;
+	}
+ }
+ else {
+	while (defined($ll =readline($fh))) {
+		next	if $ll !~/^\d{2,4}-\d\d-\d\d/;
+		last	if $ll ge $ds;
+	}
+ }
+ while (defined($ll)) {
+	last	if $ll !~/^\d{2,4}-\d\d-\d\d\s/
+		? 0
+		: !$de || ($ll lt $de)
+		? 0
+		: ($o =~/</) && ($o !~/<=/)
+		? $ll gt $de
+		: 1;
+	$_ =$ll;
+	if (&$q1($s, $ll)) {
+		print $ll	if !$q2 && ($o =~/v/);
+		$rr .=$ll	if !$q2 && ($o =~/s/);
+	}
+	$ll =readline($fh);
+ }
+ if ($q2) {
+	my $r =&$q2($s, $rr);
+	print $r	if $o =~/v/;
+	$rr =$r		if $o =~/s/;
+ }
+ close($fh);
+ $rr
+}
+
 
 
 sub atesc {	# Escape 'at' options
@@ -439,19 +642,35 @@ sub atarg {	# Repeat 'at' options in subsequent entry using first
 sub run {	# Start OS command
  my $s =$_[0];	# (command) -> !exit code
  $!=$^E=0;
- $s->printflush(join(' ',@_[1..$#_]),"\n");
+ $s->echolog($$,'run','',join(' ',@_[1..$#_]));
  my $r =system(@_[1..$#_]);
- $s->printflush("Error '$!'\n") if $r <0;
+ # my $r =system(1,@_[1..$#_]); # 1 == P_NOWAIT
+ # if ($r <0) {
+ #	$s->echo($$,'run','',"Error '$!'") if $r <0;
+ # }
+ # elsif ($r) {
+ #	$s->echowr($r,'Start', $$, ' # ', join(' ',@_));
+ #	waitpid($r,0)
+ #	$s->echowr($r,'End', $$, ' # ', join(' ',@_));
+ # }
+ $s->echolog($$,'Error', '', "$! # ", join(' ','run',@_[1..$#_]))
+	if $r <0;
  ($r >=0) && !($?>>8)
 }
 
 
 sub runopen {	# Open OS command as filehandle
  my $s =$_[0];	# (command) -> file handle
- $s->printflush(join(' ',@_[1..$#_]),"\n");
+ $s->echolog($$,'runopen','',join(' ',@_[1..$#_]));
  my $h;
  $!=$^E=0;
  $s->{-runopen} =$s->copen($h, @_[1..$#_]);
+ my $e;
+ if (!$s->{-runopen}) {
+	$e =$@ ||$!;
+	$s->echolog($$,'Error', '', "$e # ", join(' ','runopen',@_[1..$#_]));
+	$@ =$e;
+ }
  $s->{-runopen} && $h;
 }
 
@@ -459,9 +678,11 @@ sub runopen {	# Open OS command as filehandle
 sub runlist {	# List OS command as an array
  my $s =$_[0];	# (command) -> strings list
  my $h =runopen(@_);
- my @r =map {(/[\r\n]*$/ ? $` : $_)} <$h>;
- waitpid($s->{-runopen},0);
-#$s->flush();
+ my @r;
+ if ($s->{-runopen}) {
+	@r =map {(/[\r\n]*$/ ? $` : $_)} <$h>;
+	waitpid($s->{-runopen},0);
+ }
  @r
 }
 
@@ -470,15 +691,25 @@ sub runlcl {	# Log os command line
  my $s =shift;	# (command) -> success
  $s->loglck(1);
  $s->logrdr(0) if !$s->{-wrlog};
- $s->echolog(join(' ',@_));
- my $r  =system(@_);
- if ($r <0) {
-	$s->{-wrlog}->print($s->strtime(), " Error '$!' (", join(' ',@_) ,")\n");
+ $s->echolog($$,'runlcl','',join(' ',@_));
+ my $r;
+ if (0) {
+	$r =system(@_);
+	$r <0
+	? $s->echolog($$,'Error','',"$! # ", join(' ','runlcl',@_))
+	: $s->echowr($$,'Result','',($?>>8),' # ', join(' ','runlcl',@_))
  }
  else {
-	$s->{-wrlog}->print($s->strtime(), ' Exit ',($?>>8),' (', join(' ',@_), ")\n");
+	$r =system(1,@_); # 1 == P_NOWAIT
+	if ($r <0) {
+		$s->echolog($$,'Error', '', "$! # ", join(' ','runlcl',@_));
+	}
+	elsif ($r) {
+		$s->echowr($r, 'Start', $$, join(' ','runlcl',@_));
+		waitpid($r,0);
+		$s->echowr($r, 'End', '', ($?>>8), ' # ',join(' ','runlcl',@_));
+	}
  }
- $s->{-wrlog}->flush();
  $s->loglck(0);
  ($r >=0) && !($?>>8)
 }
@@ -488,23 +719,21 @@ sub runlog {	# Log os command execution
  my $s =shift;	# (command) -> success
  $s->loglck(1);  
  $s->logrdr(0) if !$s->{-wrlog};
- $s->echolog(join(' ',@_));
+ $s->echolog($$,'runlog','',join(' ',@_));
  $!=$^E=0;
  my $hi;
  my $pid =$s->copen($hi, @_);
  if ($pid) {
-	$s->{-wrlog}->print($s->strtime(), ' $$', $pid, ' (', join(' ',@_), ")\n");
-	$s->{-wrlog}->flush();
+	$s->echowr($pid, 'Start', $$, join(' ',@_));
 	my $r =undef;
 	while(defined($r=readline($hi))) {
 		$r = $` if $r =~/[\r\n]*$/;
-		print($r, "\n");
-		$s->{-wrlog}->print($r, "\n");
+		next if $r eq '';
+		echolog($s, $pid, '', '', $r);
 	}
 	$hi && close($hi);
 	waitpid($pid,0);
-	$s->{-wrlog}->print($s->strtime(), ' Exit ', ($?>>8),' (', join(' ',@_), ")\n");
-	$s->{-wrlog}->flush();
+	$s->echowr($pid, 'End', '', ($?>>8), ' # ', join(' ',@_));
 	$s->loglck(0);
 	return !($?>>8)
  }
@@ -512,8 +741,7 @@ sub runlog {	# Log os command execution
 	my @e =($!, $^E);
 	$hi && close($hi);
 	($!, $^E) =@e;
-	$s->{-wrlog}->print($s->strtime(), " Error '$!' (", join(' ',@_), ")\n");
-	$s->{-wrlog}->flush();
+	$s->echolog($$, 'Error', '', $!, ' # ', join(' ',@_));
 	$s->loglck(0);
 	return(undef)
  }
@@ -527,8 +755,7 @@ sub cmdfile {	# Shift command file
  if ($_[0]->{-cmdfile}->{-retexc}) {
 	$_[0]->loglck(1);
 	$_[0]->logrdr(0) if !$_[0]->{-wrlog};
-	$_[0]->echolog('cmdfile',$_[0]->{-cmdfile}->{-retexc});
-	$_[0]->{-wrlog}->flush();
+	$_[0]->echolog($$,'cmdfile','',join(' ',$_[0]->{-cmdfile}->{-retexc}));
 	$_[0]->loglck(0);
  }
  $r	
@@ -542,8 +769,7 @@ sub cmdfck {	# Check command file
  if ($_[0]->{-cmdfile}->{-retexc}) {
 	$_[0]->loglck(1);
 	$_[0]->logrdr(0) if !$_[0]->{-wrlog};
-	$_[0]->echolog('cmdfile',$_[0]->{-cmdfile}->{-retexc});
-	$_[0]->{-wrlog}->flush();
+	$_[0]->echolog($$,'cmdfile','',join(' ',$_[0]->{-cmdfile}->{-retexc}));
 	$_[0]->loglck(0);
  }
  $r
@@ -570,16 +796,24 @@ sub w32svco {	# Win32 service object
  my $n=$s->{-prgsn};
  my $m=1;	# 0 net use, 1 wmi, 2 adsi
  local $^W=undef;
+ my $r;
  my $o =$s->{-w32svco} =$s->{-w32svco} || 
 	(!$m
 	? undef
 	: $m ==1
 	? (eval('use Win32::OLE; 1') && Win32::OLE->GetObject("winmgmts:Win32_Service.Name='$n'"))
 	: (eval('use Win32::OLE; 1') && Win32::OLE->GetObject('WinNT://' .Win32::NodeName() .'/' .$n .',Service')));
- return($o) if !$#_;
- my $r;
- $@ =undef;
- if (!$m) {
+ if ($m && !$o) {
+	$@ ='Win32::OLE->GetObject() -> ' .$s->w32oleerr();
+	$s->echowrf($$, 'Warning', '', $@ .' # w32svco(' .$m .',' .($#_ ? $_[1] : 'undef') ."); Using 'net' command...")
+ }
+ else {
+	$@ =undef;
+ }
+ if (!$#_) {
+	return($o)
+ }
+ elsif (!$m || !$o) {
 	$r =$s->run('net', ($_[1] ? 'start' : 'stop'), $n);
 	$@ ='exit ' .($?>>8) if !$r;
  }
@@ -602,18 +836,23 @@ sub w32svco {	# Win32 service object
 sub startup {	# Start schedule execution (internal)
  my $s=$_[0];	# () -> self
  $s->{''} =1;
+ $s->autoflush(1) if $s->{-autoflush};
  $s->{-dirv} = -d ($s->{-dirb} .$s->{-dirm} .'var')
 		? ($s->{-dirb} .$s->{-dirm} .'var')
 		: ($s->{-dirb} .$s->{-dirm} .$s->{-prgcn})
 	if !$s->{-dirv};
- if ($s->{-runmod} =~/^-set/) {			# clean schedule existed
-	$s->printflush($s->class(), " Scheduling '", $s->{-prgsn}, "'\n");
+ if ($s->{-runmod} =~/^-*logask/) {
+	$s->logask(@ARGV[1..$#ARGV]);
+ }
+ elsif ($s->{-runmod} =~/^-set/) {			# clean schedule existed
+	$s->echo($$,'Scheduling','', $s->{-runmod});
+	$s->echowrf($$,'StartSched','',join(' ',$s->{-runmod}));
 	mkdir($s->{-dirv},0777) if !-e $s->{-dirv};
 	if ($s->{-w32at}) {
 		my $qs =$s->{-prgfn};
 		my @at =split /\s*\r*\n\r*/, `at`;
 		foreach my $r (@at) {
-			next if $r !~/\b\Q$qs\E\b/;
+			next if $r !~/\b\Q$qs\E\b/i;
 			my $i =($r =~/^[^\d]*(\d+)/ ? $1 : undef);
 			next if !$i;
 			$s->run('at', $i, '/d', '/y');
@@ -622,7 +861,7 @@ sub startup {	# Start schedule execution (internal)
 	else {
 		my $qs =$s->{-prgfn};
 		$s->{-crontab} =
-			[map {	/\b\Q$qs\E\b/ ? () : ($_)
+			[map {	/\b\Q$qs\E\b/i ? () : ($_)
 				} split /\s*\r*\n\r*/, `crontab -l`];
 		$s->vfwrite('>crontab.txt',@{$s->{-crontab}});
 		$s->run('crontab',$s->vfname('crontab.txt'));
@@ -632,14 +871,15 @@ sub startup {	# Start schedule execution (internal)
  elsif ($s->{-runmod} eq '-svcinst') {		# install service
 	croak("Error: Win32 only function") if $^O ne 'MSWin32';
 	my $n =$s->{-prgsn};
-	$s->printflush($s->class(), " Installing Windows Service '$n'...\n");
+	$s->echo($$,'Installing Windows Service','', $s->{-runmod},',',$n,'...');
+	$s->echowrf($$,'StartSched','',join(' ',$s->{-runmod}));
 	my $p ='';
 	foreach my $d (split /\s*\;\s*/, $ENV{PATH}) {
 		next if !-e "$d\\srvany.exe";
 		$p =$d; last;
 	}
 	if (!$p) {
-		$s->printflush("Not found ResKip 'srvany.exe' in path, exit.\n");
+		$s->error($$,'','',"Not found ResKip 'srvany.exe' in path, exit.");
 		exit(1);
 	}
 	$s->run('instsrv',$n,"$p\\srvany.exe");
@@ -656,20 +896,23 @@ sub startup {	# Start schedule execution (internal)
 		,($ARGV[1] ? ('obj=', $ARGV[1]) : ())
 		,($ARGV[2] ? ('password=', $ARGV[2]) : ())
 		);
-	$s->printflush("\nCheck '$n' service 'Startup type' and 'Log on'!\n");
+	$s->echo();
+	$s->echo($$,'-svcinst','', "Check '$n' service 'Startup type' and 'Log on'!");
 	exit(0);
  }
  elsif ($s->{-runmod} eq '-svcdel') {		# remove service
 	croak("Error: Win32 only function") if $^O ne 'MSWin32';
 	my $n =$s->{-prgsn};
-	$s->printflush($s->class(), " Removing Windows Service '$n'...\n");
+	$s->echo($$,'Removing Windows Service','', $s->{-runmod},',',$n,'...');
+	$s->echowrf($$,'StartSched','',join(' ',$s->{-runmod}));
 	$s->run('instsrv',$n,"Remove");
 	exit(0);
  }
  elsif ($s->{-runmod} eq '-surun') {		# start switched user and exit
 	if ($^O eq 'MSWin32') {
 		if ($s->{-susr} && $s->{-spsw}) {
-			$s->printflush('[',$s->{-prgfn},'] -surun:wmi, ',($s->{-runarg}||0), ', $$', $$,"...\n");
+			$s->echo($$,'StartSched','','-surun:wmi ',$s->{-runarg}||0);
+			$s->echowrf($$,'StartSched','','-surun:wmi ',$s->{-runarg}||0);
 			local $^W=undef;
 			eval('use Win32::OLE');
 			my $wmi =Win32::OLE->new('WbemScripting.SWbemLocator');
@@ -682,23 +925,28 @@ sub startup {	# Start schedule execution (internal)
 			$mih->Create(join(' '
 					,$^X,$s->{-prgfn},'-runsu'
 					,$s->{-runarg}||0
+					,$#ARGV >1 ? $s->qclae(@ARGV[2..$#ARGV]) : ()
 					), undef,undef,$wmi)
 				&& croak 'Error(WMI->Create): ' .$s->w32oleerr();
 		}
 		else {
 			my $n =$s->{-prgsn};
-			$s->printflush('[',$s->{-prgfn},'] -surun, ',($s->{-runarg}||0), ', $$', $$,"...\n");
+			$s->echo($$,'StartSched','','-surun:svc ',($s->{-runarg}||0), "...\n");
 			$s->logrdr(0) if !$s->{-wrlog};
-			$s->{-wrlog}->print("\n", $s->strtime(), ' [', $s->{-prgsn},'] -surun, ',($s->{-runarg}||0), ', $$', $$,"\n");
-			$s->{-wrlog}->flush();
+			$s->echowr();
+			$s->echowr($$,'StartSched','','-surun:svc ',$s->{-runarg}||0);
 			$s->loglcs(2);
 			$s->w32svco(0);
 			$s->w32svcr("$n\\Parameters")->{AppParameters}
 				='-e"$SIG{CHLD}=\'IGNORE\';system(1,$^X,@ARGV)" '
-				.$s->{-prgfn} .' -runsu ' .($s->{-runarg}||0);
-			$s->w32svco(1);
-			$s->{-wrlog}->print("Error '$@' (w32svco,1)\n")
-				if $@;
+				.join(' '
+					,$s->{-prgfn}
+					,'-runsu'
+					,$s->{-runarg}||0
+					,$#ARGV >1 ? $s->qclae(@ARGV[2..$#ARGV]) : ()
+				);
+			$s->w32svco(1)
+			|| ($@ && $s->echowr($$,'Error','',"$@ # w32svco,1"));
 			# !!! service startup may be continues, interrupted
 			# $s->w32svcr("$n\\Parameters")->{AppParameters}
 			#	='-e"$SIG{CHLD}=\'IGNORE\';system(1,$^X,@ARGV)" '
@@ -707,35 +955,41 @@ sub startup {	# Start schedule execution (internal)
 		}
 		exit(0);
 	}
+	elsif ($s->{-susr} && !$s->{-spsw}) {
+		$s->echo($$,'StartSched','','-surun:su ',$s->{-runarg}||0);
+		$s->echowrf($$,'StartSched','','-surun:su ',$s->{-runarg}||0);
+		$SIG{CHLD}='IGNORE';
+		($>||0) ==0
+		? $s->run(1
+			,(-e '/bin/su' ? '/bin/su' : 'su')
+			,$s->{-susr}
+			,'-c','"' .join(' '
+				,$^X
+				,($s->{-prgfn} =~/\.(?:bat|cmd)$/i ? ('-x') : ())
+				,$s->{-prgfn}, '-runsu', $s->{-runarg}
+				,$#ARGV >1 ? $s->qclae(@ARGV[2..$#ARGV]) : ()
+				) .'"')
+		: $s->run(1
+			,(-e '/bin/sudo' ? '/bin/sudo' : 'sudo')
+			,'-u', $s->{-susr}
+			,$^X, $s->{-prgfn}, '-runsu', $s->{-runarg}
+			,$#ARGV >1 ? $s->qclae(@ARGV[2..$#ARGV]) : ()
+			);
+		exit(0)
+	}
 	else {
-		if ($s->{-susr} && !$s->{-spsw}) {
-			$SIG{CHLD}='IGNORE';
-			($>||0) ==0
-			? $s->run(1
-				,(-e '/bin/su' ? '/bin/su' : 'su')
-				,$s->{-susr}
-				,'-c','"' .join(' '
-					,$^X
-					,($s->{-prgfn} =~/\.(?:bat|cmd)$/i ? ('-x') : ())
-					,$s->{-prgfn}, '-runsu', $s->{-runarg})
-					.'"')
-			: $s->run(1
-				,(-e '/bin/sudo' ? '/bin/sudo' : 'sudo')
-				,'-u', $s->{-susr}
-				,$^X, $s->{-prgfn}, '-runsu', $s->{-runarg});
-			exit(0)
-		}
-		$s->printflush('[',$s->{-prgfn},'] -runsu, ',($s->{-runarg}||0), ', $$', $$,"...\n");
 		$s->{-runmod} ='-runsu';
+		$s->echo($$,'StartSched','',join(' ',$s->{-runmod}, $s->{-runarg}||0));
 	}
  }
  elsif ($s->{-runmod} eq '-run') {		# run task
-	$s->printflush('[',$s->{-prgfn},'] -run, ',($s->{-runarg}||0), ', $$', $$,"...\n");
+	$s->echo($$,'StartSched','',join(' ',$s->{-runmod}, $s->{-runarg}||0));
  }
  elsif ($s->{-runmod} eq '-runsu') {		# run task switched user
+	$s->echo($$,'StartSched','',join(' ',$s->{-runmod}, $s->{-runarg}||0));
+	@ARGV[2..$#ARGV] =$s->qclau(@ARGV[2..$#ARGV]) if $#ARGV >1;
 	if ($^O eq 'MSWin32') {
 		my $n =$s->{-prgsn};
-		$s->printflush('[',$s->{-prgfn},'] -runsu, ',($s->{-runarg}||0), ', $$', $$,"...\n");
 		if (!$s->{-susr}
 		&& (($s->w32svcr("$n\\Parameters\\AppParameters")||'') 
 				!~/\s0\s*$/)) {	# from -surun
@@ -747,9 +1001,6 @@ sub startup {	# Start schedule execution (internal)
 		}
 		$s->w32svco(0) if !$s->{-susr};
 	}
-	else {
-		$s->printflush('[',$s->{-prgfn},'] -runsu, ',($s->{-runarg}||0), ', $$', $$,"...\n");
-	}
  }
  else {
 	croak("Error('-runmod'): " 
@@ -758,20 +1009,6 @@ sub startup {	# Start schedule execution (internal)
  }
 
  if ($s->{-runmod} =~/^-run/) {			# log/pid file rotator
-	$s->{-logpid} =$s->vfname() .$$ .'-' .$_[0]->{-prgcn}
-		.$s->{-runmod}			# pid file
-		.(do{	my $a =$s->{-runarg};
-			# $a =~s/([^a-zA-Z0-9_.-])/uc sprintf("%%%02x",ord($1))/eg;
-			$a =~s/\s/_/g;
-			$a =~s/:/-/g;
-			$a =~s/([^a-zA-Z0-9_.-])/-/g;
-			$a
-			})
-		.'.pid'
-		if $s->{-logpid};
-	$s->fwrite($s->{-logpid}, $s->strtime() .' ['.$s->{-prgsn} 
-		."] " .$s->{-runmod} .', ' .$s->{-runarg} .', $$' .$$) 
-		if $s->{-logpid};
 	if ($s->{-logmax}			# log file rotator
 	&& ($s->{-logmax} <((-s $s->vfname('log.txt'))||0))) {
 		$s->logrdr(undef) if $s->{-wrlog};
@@ -780,27 +1017,7 @@ sub startup {	# Start schedule execution (internal)
 			$s->loglck(0);
 		}
 	}
-	$s->vfwrite('>>log.txt', "\n". $s->strtime() .' ['.$s->{-prgsn} 
-		."] " .$s->{-runmod} .', ' .$s->{-runarg} .', $$' .$$);
-	local *DIR;				# pid file cleaner
-	if ($s->{-logpid} && $_[0]->{-dirv} && opendir(DIR, $_[0]->{-dirv})) {
-		my $f;
-		my $q ='-' .$_[0]->{-prgcn} .'-';
-		while ($f =readdir(DIR)) {
-			next	if !$f
-				|| ($f !~/\.pid$/i)
-				|| ($f !~/^\d+\Q$q\E/)
-				|| ($s->{-logpid} =~/\Q$f\E$/i);
-			my $n =$_[0]->{-dirv} .$_[0]->{-dirm} .$f;
-			my $t =(stat($n))[8];
-			next	if time() -$t < 60*60*24*5;
-			$s->echolog('unlink',' ',$n
-				, unlink($n)
-				? ()
-				: (map {$_ ? ($_) : ()} ' ',$!,' ',$^E));
-		}
-
-	}
+	$s->echowrf($$,'StartSched','',join(' ',$s->{-runmod}, $s->{-runarg}||0));
  }
 
  if ($s->{-runmod} =~/^-run/) {			# work dir
@@ -869,10 +1086,9 @@ sub at_ {	# At... condition (implementation)
 		$s->logrdr(0) if !$s->{-wrlog};
 		my $r =undef;
 		if ($s->atopt("-$on")) {
+			$s->echowr($$,'at','',$o);
 			$s->{-atopt} .=$on;
-			$s->vfwrite($on .'.txt', $s->strtime() ." " .$s->class() .'::at $$' .$$);
-			$s->{-wrlog}->print($s->strtime(), " [", $s->{-prgsn}, "] $o\n");
-			$s->{-wrlog}->flush();
+			$s->vfwrite($on .'.txt', $s->strtime() ." [$$]: at: $o");
 			$r =1
 		}
 		$s->loglck(0);
@@ -893,7 +1109,7 @@ sub at_ {	# At... condition (implementation)
 	&& (!defined($_[2]) ||($_[2] eq ''))
 		) {
 		$s->{-atarg} =$s->{-w32at}
-			? [$s->{"-$1"} .':00', '/every:M,T,W,Th,F,S,Su']
+			? [$s->{"-$1"} .':00', $o=~/i/ ? '/interactive' : (), '/every:M,T,W,Th,F,S,Su']
 			: [0, $s->{"-$1"}, '*', '*', '*']
 	}
 	return(undef)			# without system scheduler
@@ -901,7 +1117,7 @@ sub at_ {	# At... condition (implementation)
 		&& !$s->{-atarg}
 		&& (!defined($_[2]) ||($_[2] =~/^(?:|0|\w[\w\d_]*)$/));
 	if ($s->{-w32at}) {		# win32at system scheduler
-		$s->echologdie("Error(-set): Win32 service '" .$s->{-prgsn} ."' not installed")
+		$s->error($$,'',"-set: Win32 service '" .$s->{-prgsn} ."' not installed")
 			if ($o =~/s/)
 			&& !$s->{-susr} && !$s->{-spsw}
 			&& !$s->w32svcr($s->{-prgsn});
@@ -966,16 +1182,17 @@ sub soon {	# Cyclical starting sub{}
 		# (?-options, 'self', -runmod, -runarg)
 		# (?-options, period, name, code{})
  my ($s, $o, $p, $n, $c) =(shift, ($_[0]=~/^-/ ? shift : '-'), @_);
- $s->echologdie("Error(soon): not Win32") if $^O ne 'MSWin32';
+ $s->error($$,'soon',"Error: not Win32") if $^O ne 'MSWin32';
  return(undef)	if $s->{-runmod} !~/^(?:-run|-runsu|-set)/;
- if (!$c || ($n eq 'self')) {
+ if (!ref($c) || ($n eq 'self')) {
 	if ($s->{-runmod} =~/^(?:-run|-runsu)/) {
 		my @t1 =localtime(time +(!$p ? 60 *15 : $p <60 ? 60 : $p));
 		my @c =('at',$t1[2] .':' .$t1[1]
 				,($o =~/i/ ? ('/interactive') : ())
 				,($n eq 'self'
-				? join(' ', $^X, $s->{-prgfn}, @_[2..$#_])
-				: $n));
+				? ($^X, $s->{-prgfn}, @_[2..$#_])
+				: ($n, $#_ >1 ? @_[2..$#_] : ())
+				));
 		return($s->run(@c));
 	}
 	else {
@@ -987,7 +1204,7 @@ sub soon {	# Cyclical starting sub{}
  my $t =defined($s->{-runarg}) && ($s->{-runarg} eq $n)
 	&& defined($s->{-runmod})
 	&& ($s->{-runmod} eq ($o =~/s/ ? '-runsu' : '-run'));
- return(undef)	if !$t && (`at` =~/\b\Q$q\E\b/);
+ return(undef)	if !$t && (`at` =~/\b\Q$q\E\b/i);
  my $r =undef;
  if ($s->loglcs(2, $t ? 0 : 1)) {
 	$s->logrdr(0) if !$s->{-wrlog};
@@ -1001,11 +1218,11 @@ sub soon {	# Cyclical starting sub{}
 	}
 	if (1) {				# reschedule
 		foreach my $r (split /\s*\r*\n\r*/, `at`) {
-			next if $r !~/\b\Q$q\E\b/;
+			next if $r !~/\b\Q$q\E\b/i;
 			my $i =($r =~/^[^\d]*(\d+)/ ? $1 : undef);
 			next if !$i;
 			my @c =('at', $i, '/d', '/y');
-			$s->echolog('[soon] ', join(' ',$n,@c));
+			$s->echolog($$,'soon', '', join(' ',$n,@c));
 			system(@c);
 		}
 		$p =$p		# !!! long period may be shorten somehow
@@ -1018,10 +1235,9 @@ sub soon {	# Cyclical starting sub{}
 			,$s->{-prgfn}
 			,$o =~/s/ ? '-surun' : '-run'
 			,$n);
-		$s->echolog('[soon] ', join(' ',$n,@c));
-		map {$s->echolog('[soon] ',$n,' ',$_)
+		$s->echolog($$,'soon', '', join(' ',$n,@c));
+		map {$s->echolog($$,'soon', '', $n,' ',$_)
 			} $s->runlist(@c);
-		$s->{-wrlog}->flush();
 	}
 	$s->loglcs(0,1);
  }
@@ -1035,7 +1251,7 @@ sub soon {	# Cyclical starting sub{}
 sub chpswd {	# Change service password
  my ($s,$su,$sp,@sh) =@_;	# (user, password, additional hosts) -> success
 				# (..., [host, service],...)
- $s->echologdie("Error(chpswd): not Win32") if $^O ne 'MSWin32';
+ $s->error($$,'chpswd',"Error: not Win32") if $^O ne 'MSWin32';
  $s->loglck(2);
  $s->logrdr(0) if !$s->{-wrlog};
  my $sn =$s->{-prgsn};
@@ -1046,32 +1262,40 @@ sub chpswd {	# Change service password
 				next if chr($c) !~/[\w\d.!#\@\$\%&+-]/;
 				$p .=chr($c);
 			} $p};
- print("[chpswd] $sn,$su,'*','',", join(',',@sh), "\n");
- $s->{-wrlog}->print($s->strtime(), " [chpswd] net user $su\n");
+ $s->echo($$,'chpswd','',"$sn,$su,'*','',", join(',',@sh));
+ $s->echowr($$,'chpswd','',"net user $su");
  my $e  ='';
- my @rc =$s->runlist('net','user'
+ my @rc =do{	my $v =join(' ',
+		'net','user'
 		,($su =~/\\/ ? $' : $su =~/\@/ ? $` : $su)
 		,'"' .$sp .'"'
 		,($su =~/(?:\\|\@)/ ? '/domain' : ())
+		,'2>>&1'
 		);
- if (scalar(@rc) ? !grep /\ssuccess/i, @rc : $?>>8) {
-	$e =$@ ="Error " .($?>>8) ." (net user $su)\n" .join("\n", @rc);
-	$s->echologwarn($@);
+		$s->echo($$,'chpswd','',$v);
+		map {(/[\r\n]*$/ ? $` : $_)} `$v`};
+ if ($?>>8) {
+	$e =$@ ="chpswd: " .($?>>8) ." # net user $su\n" .join("\n", @rc);
+	foreach my $v (split /[\n\r]+/, $e) {
+		$s->echolog($$,'Error','',$v);
+	}
 	$s->loglck(0);
 	return(undef);
  }
  else {
-	map {	$s->{-wrlog}->print($s->strtime()," [chpswd] $_\n") if $_
+	map {	$s->echolog($$,'chpswd','',$_) if $_
 		} @rc;
 	foreach my $h ('',@sh) {
-		$s->{-wrlog}->print($s->strtime(), ' [chpswd] sc '
-			, (ref($h) ? $h->[0] ||'' : $h ||'') 
-			,' config \'', (ref($h) ? $h->[1] ||$sn ||'' : $sn ||'')
-			,"'\n");
 		my $ei ='';
 		my $i  =0;
 		while(1) {
-			@rc =$s->runlist('sc', (ref($h) && $h->[0]
+			$s->echowr($$,'chpswd','','sc '
+				, (ref($h) ? $h->[0] ||'' : $h ||'') 
+				,' config \'', (ref($h) ? $h->[1] ||$sn ||'' : $sn ||'')
+				, '\''
+				);
+			@rc =do{my $v =join(' ',
+					,'sc', (ref($h) && $h->[0]
 					? '\\\\' .$h->[0]
 					: !ref($h) && $h 
 					? "\\\\$h" 
@@ -1081,25 +1305,29 @@ sub chpswd {	# Change service password
 					: $sn)
 				,'type=', 'own'
 				,'obj=', ($su =~/(?:\\|\@)/ ? $su : ".\\$su")
-				,'password=', '"' .$sp .'"');
+				,'password=', '"' .$sp .'"'
+				);
+				$s->echo($$,'chpswd','',$v);
+				map {(/[\r\n]*$/ ? $` : $_)} `$v`};
 			if (scalar(@rc) ? !grep /\ssuccess/i, @rc : $?>>8) {
-				$@ ='Error '
+				$@ ='chpswd: '
 					.($?>>8)
-					.' (sc '
+					.' # sc '
 					.(ref($h) ? $h->[0] ||'' : $h ||'')
 					.' config \''
 					.(ref($h) ? $h->[1] ||$sn ||'' : $sn ||'')
-					.'\')' ."\n" .join("\n", @rc);
+					."'\n" .join("\n", @rc);
 				$ei =$@;
-				$s->echologwarn($@);
+				foreach my $v (split /[\n\r]+/, $ei) {
+					$s->echolog($$,'Error','',$v);
+				}
 				last if !$h || (ref($h) && !$h->[0]);
 				last if ++$i >2;
 				sleep(10)
 			}
 			else {
 				$ei ='';
-				map {	$s->{-wrlog}->print($s->strtime()
-						," [chpswd] $_\n") if $_
+				map {	$s->echolog($$,'chpswd','',$_) if $_
 					} @rc;
 				last;
 			}

@@ -1020,6 +1020,16 @@ Saved STDOUT file handle.
 
 =over
 
+=item '2009-03-23'
+
+C<connect> changed: IWbemLocator.ConnectServer(...,wbemConnectFlagUseMaxWait) used when C<-timeout> is undefined or true.
+
+
+=item '2008-10-13'
+
+Command line quoting/escaping corrected for 'rsh' C<-init>.
+
+
 =item '2008-08-25'
 
 OS error info extended.

@@ -200,9 +200,8 @@ sub execute {		# Execute command (target action)
  my $s =$_[0];		# ( ? [command line], ? -option=>value,...)	-> self
     $s->set(@_[1..$#_]);
  my $p =($ENV{SMPID} && ($ENV{SMPID}=~/^\d+$/) && ($ENV{SMPID} ne $$)
-	? ($ENV{SMPID} .',') 
-	: ('')) .$$;
-
+	? $ENV{SMPID}
+	: '');
  my $fl =$s->{-clog};
 	foreach my $k ('-go.txt','-run.txt','-ok.txt','-err.txt','-erg.txt') {
 		next if !-e "$fl$k";
@@ -210,15 +209,20 @@ sub execute {		# Execute command (target action)
 	}
     $fl =$s->{-clog} .'-run.txt';
  my $fh =IO::File->new($fl,'w')
-	|| croak("\$\$$p Error: creating '$fl': $!");
- $s->{-logpid} =$s->{-clog} =~/([^\\\/]+)([\\\/])([^\\\/]+)[\\\/]([^\\\/]+)$/ 
-	? $` .$2 .'var' .$2 .$$ .'-' .$1 .'-' .$3 .'-' .$4 .'.pid'
-	: undef;
+	|| croak("[$$]: Error: creating '$fl': $!");
+#$s->{-logpid} =$s->{-clog} =~/([^\\\/]+)([\\\/])([^\\\/]+)[\\\/]([^\\\/]+)$/ 
+#	? $` .$2 .'var' .$2 .$$ .'-' .$1 .'-' .$3 .'-' .$4 .'.pid'
+#	: undef;
  eval{$s->{-logpid} =link($fl, $s->{-logpid}) && $s->{-logpid}; $! =$^E=0} 
 	if $s->{-logpid};
- $fh->print($s->strtime()," \$\$$p "
-	,join(' ', $s->qclad(@{$s->{-cline}})),"\n");
- $fh->flush();
+ $fh->printflush($s->strtime()," [$$]: Start", ($p ? "[$p]: " : ': ')
+	,join(' ', $s->qclad(
+			$s->{-cline}->[1] && ($s->{-cline}->[1] =~/^Sys::Manage::Conn->connect/)
+			&& $s->{-cline}->[3] && ($s->{-cline}->[3] =~/([^:]+):/)
+		? (@{$s->{-cline}}[0,2], $1, @{$s->{-cline}}[4, $#{$s->{-cline}}])
+		: @{$s->{-cline}}
+			))
+	,"\n");
  local *OLDIN;	fileno(STDIN)  && open(OLDIN,  '<&STDIN');
  local *OLDOUT; fileno(STDOUT) && open(OLDOUT, '>&STDOUT');
  local *OLDERR; fileno(STDERR) && open(OLDERR, '>&STDERR');
@@ -230,8 +234,14 @@ sub execute {		# Execute command (target action)
 		$cl =[@$cl[0..$#$cl-2]];
 	}
 
- print(($s->{-echo} =~/t/ ? ($s->strtime(), ' ') : ()), "\$\$$p ", $s->{-clog}
-	," = ", join(' ', $s->qclad(@{$s->{-cline}})), "\n")
+ print(($s->{-echo} =~/t/ ? ($s->strtime(), ' ') : ())
+	,"[$$]: ", ($p ? "Start[$p]: " : '')
+	, $s->{-clog}," = ", join(' ', $s->qclad(
+		$s->{-cline}->[1] && ($s->{-cline}->[1] =~/^Sys::Manage::Conn->connect/)
+		&& $s->{-cline}->[3] && ($s->{-cline}->[3] =~/([^:]+):/)
+		? (@{$s->{-cline}}[0,2], $1, @{$s->{-cline}}[4, $#{$s->{-cline}}])
+		: @{$s->{-cline}}
+	)), "\n")
 	if $s->{-echol};
  my $hp;
  ($?,$!,$^E) =(0,0,0);
@@ -250,7 +260,7 @@ sub execute {		# Execute command (target action)
 	my @e =($?,$!,$^E,$@);
 	$fh->flush();
 	($?,$!,$^E,$@) =@e;
-	$fh->print($s->strtime(), " \$\$$p Exit: "
+	$fh->print($s->strtime(), " [$$]: End: "
 		, join(' '
 		, ($r ? 0 : $?>>8 ? $?>>8 : $@ ? 255 : 255)
 		, (($? & 127)||($? & 128)
@@ -267,15 +277,17 @@ sub execute {		# Execute command (target action)
 		} if $s->{-logpid};
 	($?,$!,$^E,$@) =@e;
 	print( 	 ($s->{-echo} =~/t/ ? ($s->strtime(), ' ') : ())
-		,"\$\$$p "
-		,($s->{-echo} =~/c/ ? $s->{-clog} ." = " : 'Exit: ')
+		,"[$$]: "
+		, ($p ? 'End: ' : '= ')
 		, join(' '
 		, ($r ? 0 : $?>>8 ? $?>>8 : $@ ? 255 : 255)
 		, (($? & 127)||($? & 128)
 		  ? '(' .($? & 127) .',' .($? & 128) .')'
 		  : ())
 		, ($@ ? (!($?>>8) ? '[eval] ' : '') ."$@" : ())
-		, ($@ ? $! .($^E ? "($^E)" : '') : ())), "\n")
+		, ($@ ? $! .($^E ? "($^E)" : '') : ()))
+		, ' # ', $s->{-clog}
+		, "\n")
 		if $s->{-echol};
 	eval{STDOUT->flush(); STDERR->flush()};
 	rename(	  $s->{-clog} .'-run.txt'
@@ -300,6 +312,7 @@ sub execute {		# Execute command (target action)
 				: $s->qclad(@$cl[2..$#$cl])
 				)
 			: $s->qclad(@$cl)))) {
+	$fh->printflush($s->strtime()," [$hp]: Running[$$]:\n");
 	($!,$^E) =(0,0);
 	my $r;
 	while (defined($r =readline($hi))) {
@@ -316,19 +329,21 @@ sub execute {		# Execute command (target action)
 		eval{STDOUT->flush(); STDERR->flush()}};
 	($?,$!,$^E,$@) =@e;
 	print( 	 ($s->{-echo} =~/t/ ? ($s->strtime(), ' ') : ())
-		,"\$\$$p "
-		,($s->{-echo} =~/c/ ? $s->{-clog} ." = " : 'Exit: ')
+		,"[$$]: "
+		, ($p ? 'End: ' : '= ')
 		,($?>>8)
 		,($?>>8 ? " $!" : '')
+		, ' # ', $s->{-clog}
 		,"\n") if $s->{-echol};
 	($?,$!,$^E,$@) =@e;
 	$fh->print($s->strtime()
-		, " \$\$$p Exit: "
+		, " [$$]: End: "
 		, ($?>>8)
 		, (($? & 127)||($? & 128)
 		  ? ' (' .($? & 127) .',' .($? & 128) .')'
 		  : '')
-		, ($?>>8 ? " $!" .($! && $^E ? " ($^E)" : '') : ''), "\n");
+		, ($?>>8 ? " $!" .($! && $^E ? " ($^E)" : '') : '')
+		, "\n");
 	$fh->close();
 	eval{$s->{-logpid} =!(-e $s->{-logpid}) || unlink($s->{-logpid}) ? undef : $s->{-logpid}
 		} if $s->{-logpid};
@@ -346,18 +361,20 @@ sub execute {		# Execute command (target action)
 	fileno(OLDOUT) && open(STDOUT, '>&OLDOUT'); fileno(OLDOUT) && close(OLDOUT);
 	fileno(OLDERR) && open(STDERR, '>&OLDERR'); fileno(OLDERR) && close(OLDERR);
 	($?,$!,$^E,$@) =@e;
-	eval{$fh->print($s->strtime(), " \$\$$p Exit: 255 [IPC] $! $@\n")};
+	eval{$fh->print($s->strtime(), " [$$]: End: 255 [IPC] $! $@"
+		#, ' # ', join(' ', $s->qclad(@{$s->{-cline}}))
+		,"\n")};
 	eval{$fh->close()};
 	eval{$s->{-logpid} =!(-e $s->{-logpid}) || unlink($s->{-logpid}) ? undef : $s->{-logpid}
 		} if $s->{-logpid};
 	eval{STDOUT->flush(); STDERR->flush()};
 	rename(($s->{-clog} .'-run.txt'), ($s->{-clog} .'-err.txt'))
-		|| carp("\$\$$p rename: (" .($s->{-clog} .'-run.txt')
+		|| carp("[$$]: rename: (" .($s->{-clog} .'-run.txt')
 			.', ' .($s->{-clog} .'-err.txt') .") -> $! " 
 			.($^E ? " ($^E)" : '') ."\n");
 	chdir($s->{-dirw}) if lc($s->getcwd()) ne lc($s->{-dirw});
 	($?,$!,$^E,$@) =@e;
-	croak("\$\$$p Exit: 255 [IPC] $! $@");
+	croak("[$$]: " .($p && !$^S ? 'End: 255' : 'Error:') ." IPC: $! $@");
  }
  $s
 }

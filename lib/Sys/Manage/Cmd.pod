@@ -40,6 +40,7 @@ Sys::Manage::Cmd - Systems management command volley
 
 	script -option -option... target command-line
 	script -option...   -ttarget...  command-line
+	script cmdfile|regask|logask|cmdstat...
 
 =item Examples of command line
 
@@ -48,6 +49,8 @@ Sys::Manage::Cmd - Systems management command volley
 	script -rPrevId	-tall		dir !elem!
 	script -aTest	-tall		dir !elem!
 	script -l10	-tall		dir !elem!
+	script regask	-1day		errors
+	script logask	-1day		pids
 
 =item Options of command line
 
@@ -81,8 +84,13 @@ Sys::Manage::Cmd - Systems management command volley
 	rcmd, rdo,	- commands to remote nodes using
 	fput, fget,		Sys::Manage::Conn
 	mput, mget		(!elem!, !user!, !pswd! substitutions not needed)
-	cmdfile		- evaluate command lines file or Perl script
-	cmdstat		- display current status using '-log'
+	cmdfile		- evaluate command lines file or Perl script using
+				Sys::Manage::CmdFile
+	regask		- display registration file system filtered with condition:
+				'all', 'dir's, 'pid's, 'err's, expression
+	logask		- display '-log' filtered with condition:
+				'all', 'pid's, 'err's, expression
+	cmdstat		- display current status using 'logask', deprecated
 	!elem!, <	- target element and source file substitutions
 	!user!, !pswd!	- user name and password substitutions
 	!log!		- log filesystem name substitution
@@ -251,11 +259,6 @@ Consider L<Sys::Manage::Conn|Sys/Manage/Conn> commands in the source code:
 'rdo' and 'ldo' (and script file names matching /\.(rdo|rdo)(?:\.\w+){0,1}$/i),
 'fput', 'fget'.
 
-Consider 'C<cmdfile>' embedded command 
-to evaluate L<Sys::Manage::CmdFile|Sys/Manage/CmdFile> or Perl script file by this script.
-
-Consider 'C<cmdstat>' embedded command to display statistics.
-
 See also C<-cline>.
 
 
@@ -383,7 +386,19 @@ B<Special commands> (in C<-assoc> syntax):
 
 ['C<cmdfile>', command file, ? history file, ? redirect log file] - evaluate L<Sys::Manage::CmdFile|Sys/Manage/CmdFile> or Perl script file by this script.
 
-['C<cmdstat>'] - display current status.
+['C<cmdstat>'] - display current status, deprecated.
+
+['C<regask>', ?-opt, ?start, ?end, query] - display registration file system.
+Options: 'v'erbose output (default), 's'tring return (for function call);
+'>=' or '<=' start and end conditions (default), '>' or '<' conditions.
+Start and End: 'yyyy-dd-mm...' row sample; /[\d]+[dhm]/ - days, hours, minutes ago.
+Query: 'all' (default), 'dir'ectories used, 'pid's running, 'err'ors, expression.
+
+['C<logask>', ?-opt, ?start, ?end, query] - display C<-log> contents.
+Options: 'v'erbose output (default), 's'tring return (for function call);
+'>=' or '<=' start and end conditions (default), '>' or '<' conditions.
+Start and End: 'yyyy-dd-mm...' row sample; /[\d]+[dhm]/ - days, hours, minutes ago.
+Query: 'all' (default), 'pid's running, 'err'ors, expression.
 
 B<L<Sys::Manage::Conn|Sys/Manage/Conn> commands> (implemented via C<-assoc>):
 'rcmd' and 'lcmd', 
@@ -829,6 +844,27 @@ $ENV{SMUSER}	- target element user.
 =head1 VERSION
 
 =over
+
+
+=item '2009-05-18'
+
+Translated C<-u> printout - password excluded.
+
+
+=item '2009-04-01'
+
+New C<regask>.
+
+
+=item '2008-12-24'
+
+Changed format of log file and messages.
+
+
+=item '2008-10-31'
+
+New C<logask>; C<cmdstat> deprecated.
+
 
 =item '2008-06-05'
 

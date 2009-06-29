@@ -8,6 +8,9 @@
 # ToDo, see also '???'
 # - testing
 # - timeout of scripts (startup, logon) should be considered
+# = echo() to log file; test file close, agent modes
+# + regexp -hostdom
+# + add -hostdom to default unames() and nnames()
 # + -hostdom for assignments text file
 # + errinfo() for NETLCK
 # + -atoy=>30 due to NETLCK
@@ -21,7 +24,7 @@ use strict;
 use Carp;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK $SELF);
-$VERSION = '0.61';
+$VERSION = '0.62';
 
 
 if ($^O eq 'MSWin32') {
@@ -78,6 +81,7 @@ sub initialize {	# Initialize newly created object
 	#,-dirmlu	=>''                    # dir of mangr logs: user
 	#,-dirmrs	=>''			# dir of mangr regs: system
 	#,-dirmru	=>''			# dir of mangr regs: user
+	#,-echof	=>''			# echo log file switch/handle
 	#,-smtpsrv	=>undef			# smtp server
 	#,-smtpeto	=>[]			# smtp to for errors
 	,-dhu		=>undef			# {user =>[names]}
@@ -105,6 +109,7 @@ sub initialize {	# Initialize newly created object
 	,-user		=>''			# user name
 	,-uadmin	=>0			# admin or system user?
 	,-usystem	=>0			# under system account?
+	,-ucon		=>1			# local console user?
 	,-domain	=>''			# domain of user
 	,-node		=>''			# node name
 	,-host		=>''			# host name of node
@@ -113,11 +118,12 @@ sub initialize {	# Initialize newly created object
 	,-atoy		=>30			# answer timeout agree
 	#,-atow		=>0			# answer timeout wait
 	#,-atov		=>1			# answer timeout value
-	#,-yasg		=>undef			# auto yes asg, if possible
-	#,-yerr		=>undef			# auto ack err
-	#,-ymyn		=>undef			# auto yes for mesg('yn')
-	#,-w32ugrps	=>undef			# win32ugrps() cached
-	#,-w32dcf	=>undef			# win32 DC netlogon filesystem
+	#,-yasg					# auto yes asg, if possible
+	#,-yerr					# auto ack err
+	#,-ymyn					# auto yes for mesg('yn')
+	#,-nodever				# POSIX::uname
+	#,-w32ugrps				# win32ugrps() cached
+	#,-w32dcf				# win32 DC netlogon filesystem
 	#,-w32srv
 	#,-w32prodtype
 	#,-w32nuse
@@ -127,6 +133,8 @@ sub initialize {	# Initialize newly created object
  $s->{-banner}	="Centralised management for desktop computers";
  $s->{-support}	="Call support, if possible";
  $s->{-host}	=eval('{no warnings; use Sys::Hostname; Sys::Hostname::hostname}');
+ $s->{-host}	=lc(Win32::NodeName())
+		if !$s->{-host} && ($^O eq 'MSWin32');
  $s->{-host}	=$s->{-host} !~/\./
 		? join('.', $s->{-host}, map {$_ ? ($_) : ()
 			} (do{local $^W =0; eval('{no warnings; use Net::Domain; Net::Domain::hostdomain}')}))
@@ -139,6 +147,7 @@ sub initialize {	# Initialize newly created object
 				$p =~s/^\\\\[^\\\/]+\\NetLogon\\/'\\\\' .$s->{-hostdom} .'\\NetLogon\\'/ie
 					if $s->{-hostdom};
 				$p});
+	$s->{-ucon}	=lc($ENV{SESSIONNAME} ||'console') ne 'console' ? 0 : 1;
 	if ($s->w32dcf()) {
 		$s->{-dirmcf} =$s->w32dcf()  .'\\' .$s->{-prgcn} .'-mcf';
 	}
@@ -148,6 +157,7 @@ sub initialize {	# Initialize newly created object
  }
  else {
 	$s->{-node}	=$s->{-host} =~/\./ ? $' : $s->{-host};
+	$s->{-ucon}	=lc(eval('use POSIX (); POSIX::ctermid()') ||'/dev/tty') !~/^\/dev\/(?:console|systty|tty)$/i ? 0 : 1;
  }
  $s->set(@_);
  $s
@@ -157,6 +167,12 @@ sub initialize {	# Initialize newly created object
 
 sub DESTROY {
  my $s =$_[0];
+ if (ref($s->{-echof})) {
+	my $h =$s->{-echof};
+	delete $s->{-echof};
+	flock($h, 8|4);
+	close($h);
+ }
 }
 
 
@@ -223,16 +239,10 @@ sub set {               # Get/set slots of object
 sub erros {		# Format OS error message
  my ($s, $v) =@_;
  ($! +0) .'. ' .$! .($^E ? ' (' .($^E +0) .'. ' .$^E .')' : '')
- .($v && ($^O eq 'MSWin32') && ($v =~/^[<>]*\\\\/)
-		# && ($! ==13) # Permission denied
- ? ' (' .join('; '
-	, $v =~/^[<>]*(\\\\.+?)[\\\/][^\\\/]*$/
-	? (-e $1 ? ('') : ("'$1': $!"))
-	: ()
-	, $v =~/^[<>]*(\\\\[^\\\/]+[\\\/][^\\\/]+)/
-	? (-e $1 ? ('') : ("'$1': $!"))
-	: ()
-	) .')'
+ .($v && ($^O eq 'MSWin32') # && ($! ==13) # Permission denied
+   && ($v =~/^[<>]*(\\\\[^\\]+\\[^\\]+)/)
+   && (!-e $1)
+ ? " ('$1': $!)"
  : '');
 }
 
@@ -303,8 +313,10 @@ sub error {		# Error final
 		, $e);
  }
  else {
-	local $|=1; print "\n";	# eval{STDOUT->flush()}
+	local $|=1;
+	$s->echo();
  }
+ flock($s->{-echof}, 8|4) if ref($s->{-echof});	# flush
  croak("Error: $e\n");
  return(undef);
 }
@@ -334,25 +346,49 @@ sub errhndl {		# Error handler
 }
 
 
-sub echo {		# Echo message
- print(@_[1..$#_],"\n")
+sub echofo {	# Open echo log file
+ return($_[0]->{-echof})	if !$_[0]->{-echof} || ref($_[0]->{-echof});
+ return(undef)	if !$_[0]->{-runmode};
+ $_[0]->{-echof} =($_[0]->{-prgsn} =~/^(.+?)\.[Pp]\w*$/ ? $1 : $_[0]->{-prgsn}) .'.log'
+		if $_[0]->{-echof} =~/^\d+$/;
+ my $fn =$_[0]->acRfm($_[0]->{-runmode},$_[0]->{-echof});
+ return(undef)	if !$fn;
+ my $fh;
+ {	local $_[0]->{-echof}=undef;
+	if (!eval('use Symbol; 1')) {
+		return($_[0]->error("Using 'Symbol':" .$_[0]->erros()))
+	}
+	elsif (!open($fh =Symbol::gensym(), ">$fn")) {
+		$fh =undef;
+		return($_[0]->error("Creating '$fn':" .$_[0]->erros()))
+	}
+ }
+ $_[0]->{-echof} =$fh;
 }
 
 
-sub mesg {
+sub echowr {	# Echo message to log file
+ $_[0]->echofo()	if $_[0]->{-echof} && !ref($_[0]->{-echof});
+ print {$_[0]->{-echof}} @_[1..$#_], "\n"
+			if ref($_[0]->{-echof});
+ 1;
+}
+
+
+sub echo {	# Echo message
+ print(@_[1..$#_],"\n")
+ && ($_[0]->{-echof} ? echowr(@_) : 1);
+}
+
+
+sub mesg {      # Message to user
  my ($s, $vk, $vt, $vq) =@_;
  my $r ='';
- print "\n", '-' x $s->{-hrlen}, "\n"
+ $s->echo("\n", '-' x $s->{-hrlen}, "\n"
 	, $s->upcase($vt)
-	, $vk eq 'err' ? (': ') : (":\n", '-' x $s->{-hrlen}, "\n");
- if ($#_ >=4) {
-	 foreach my $l (@_[4..$#_]) {
-		print $l, "\n";
-	 }
- }
- else {
-	print "\n";
- }
+	, $vk eq 'err' ? (': ') : (":\n", '-' x $s->{-hrlen}, "\n")
+	, $#_ >=4 ? join("\n",@_[4..$#_]) : ''
+	);
  my $ks =($vk =~/^(?:yn|oc)/ ? '1/0' :  '');
  Win32::Sound::Play($vk eq 'err' ? 'SystemExclamation' : 'SystemQuestion')
 	if ($^O eq 'MSWin32') && eval('use Win32::Sound; 1');
@@ -364,13 +400,13 @@ sub mesg {
 	&& $s->{-smtpeto};
  if ($s->{-ymyn} && ($vk =~/^(?:yn)/)) {
 	$r =1;
-	print	'-' x $s->{-hrlen}, "\n"
-		, $s->upcase($vq), ($ks ? " ($ks) " : " "), $r, "\n";
+	print	'-' x $s->{-hrlen}, "\n";
+	$s->echo($s->upcase($vq), ($ks ? " ($ks) " : " "), $r);
  }
  elsif ($s->{-yerr} && ($vk =~/^(?:err)/)) {
 	$r =1;
-	print	'-' x $s->{-hrlen}, "\n"
-		, $s->upcase($vq), "\n";
+	print	'-' x $s->{-hrlen}, "\n";
+	$s->echo($s->upcase($vq));
  }
  elsif (eval('use Term::ReadKey; 1')) {
 	local $|=1;
@@ -396,13 +432,14 @@ sub mesg {
 	}
 	$r =($s->{-atov} ? 1 : 0)
 		if !defined($r);
-	print $ks ? $r : '', "\n";
+	$s->echo($ks ? $r : '');
  }
  else {
 	print	'-' x $s->{-hrlen}, "\n"
 		, $s->upcase($vq), ($ks ? " ($ks) " : " ('Enter') ");
 	$r =<STDIN>;
 	chomp($r);
+	$s->echowr($r);
  }
  $r
 }
@@ -550,15 +587,18 @@ sub ffind {	# File find
 
 
 sub fpthmk {    # Create directory if needed
- return(1) if -d $_[1];
- my $a ='';
- foreach my $e (split /[\\\/]/, $_[1]) {
+ return(1) if -e $_[1];
+ my $m =$_[1] =~/([\\\/])/ ? $1 : '/';
+ my ($a, $v) =$_[1] =~/^(\\\\[^\\]+\\[^\\]+\\|\w:[\\\/]+|[\\\/]+[^\\\/]+[\\\/])(.+)/ ? ($1, $2) : ('', $_[1]);
+ foreach my $e (split /[\\\/]/, $v) {
 	$a .=$e;
-	next if !$a;
-	if (!-d $a) {
-		mkdir($a, 0777) ||return($_[0]->error("fpthmk('$a'): " .$_[0]->erros($a)));
+	if ($a && (!-d $a)) {
+		mkdir($a, 0777) ||return($_[0]->error("fpthmk("
+		.($a eq $_[1] ? "'$a'" : "'$a','$_[1]'")
+		.(do{my @v =caller(1); @v ? join(',', '', map {!defined($_) ? () : $_ =~/^\d+$/ ? $_ : "'$_'"} @v[1..3]) : ''})
+		."): " .$_[0]->erros($a)));
 	}
-	$a .='/'
+	$a .=$m
  }
  2;
 }
@@ -648,10 +688,12 @@ sub frun {	# Run file / command
 	my $x ='{package ' .scalar(caller()) ."; do '"
 		.(do{my $v =$_[1]; $v =~s/\\/\\\\/g; $v =~s/'/\\'/g; $v})
 		."'}";
+	local $SIG{__DIE__} ='DEFAULT';
 	$r =eval $x;
-	if (!defined($r) && $@) {
-		return($s->error($x,' -> ',$@)) if $o !~/i/;
-	}
+	return($s->error($x,' -> ',$!))
+		if !defined($r) && $! && ($o !~/i/);
+	return($s->error($x,' -> ',$@))
+		if !defined($r) && $@ && ($o !~/i/);
 	return($o =~/e/ ? $r : 1);
  }
  else {
@@ -719,6 +761,24 @@ sub conn {		# Connect to node
  : ref($cmd) eq 'ARRAY'
  ? grep {!$c->rcmd($_)} @$cmd
  : $c->rcmd($cmd);
+}
+
+
+sub w32ver {		# Win32::GetOSVersion
+			# (?index)
+ $_[0]->{-w32ver} =[Win32::GetOSVersion()] if !$_[0]->{-w32ver};
+ defined($_[1]) ? $_[0]->{-w32ver}->[$_[1]] : $_[0]->{-w32ver}
+}
+
+
+sub nodever {		# POSIX::uname()
+			# (?index)
+ if (!$_[0]->{-nodever}) {
+	$_[0]->{-nodever} =[eval('use POSIX (); POSIX::uname()')];
+	@{$_[0]->{-nodever}} =($^O,$_[0]->{-host},0,0,0)
+		if !defined($_[0]->{-nodever}->[0])
+ }
+ defined($_[1]) ? $_[0]->{-nodever}->[$_[1]] : $_[0]->{-nodever}
 }
 
 
@@ -917,11 +977,11 @@ sub w32nuse {		# Win32 'net use' commands
  $s->{-w32nuse} =`net use`	if !$s->{-w32nuse};
  return($s->{-w32nuse})	if !$d;
  chop($d)	if substr($d,-1) eq ':';
- return($s->{-w32nuse} =~/\s\Q${d}:\E\s*([^\s]*)/i ? ($1 || $d) : (0))
+ return($s->{-w32nuse} =~/\s\Q${d}:\E\s+([^\s]*)/i ? ($1 || $d) : (0))
 		if !$p;
  return($d)
-		if $s->{-w32nuse} =~/\s\Q${d}:\E\s+\Q${p}\E/i;
- my $r;
+		if $s->{-w32nuse} =~/\s\Q${d}:\E\s+\Q${p}\E[\s\r\n]/i;
+ my ($r, $err);
  if ($p =~/^\/d/i) {
 	$r =$s->frun($o, 'net', 'use', $d .':', '/delete', @a);
  }
@@ -935,7 +995,7 @@ sub w32nuse {		# Win32 'net use' commands
 		: "net use ${d}: $p 2>&1");
 	$v =`$v`;
 	$r =$?>>8;
-	return($s->error(join(' ','net','use',$d,$p,@a,'->','$?' .$r,$v)))
+	$err =join(' ','net','use',$d,$p,@a,'->','$?' .$r,$v)
 		if $r && ($o !~/i/);
 	$r =!$r;
  }
@@ -948,6 +1008,14 @@ sub w32nuse {		# Win32 'net use' commands
 	`net use $d /delete`;
 	$r =$s->frun($o, 'net', 'use', $d .':', $p, @a);
  }
+ if ($r) {
+	$s->{-w32nuse} =~s/[\r\n]+[^\r\n]+?\s+\Q${d}:\E\s+[^\r\n]*//i;
+	$s->{-w32nuse} .="\nw32nuse ${d}: $p\n" if $p !~/^\/d/i;
+ }
+ else {
+	delete $s->{-w32nuse};
+	return($s->error($err)) if $err;
+ }
  $r && $d
 }
 
@@ -957,7 +1025,8 @@ sub w32umnu {		# Win32 User Menu Item policy
 			# (opt, clean filter sub{}(ffind sub{}))
 			# start 'm'enu, 'p'rograms, 'd'esktop, 'i'gnore, 'v'erbose
 			# $s->{-w32umnu} may be base path to menu item dirs.
- my ($s, $p, $f, %o) =@_;
+ my ($s, $p, $f) =@_;
+ my %o =!defined($_[3]) ? () : ref($_[3]) ? %{$_[3]} : (@_[3..$#_]);
  local $_;
  if (!$s->{-w32umnuM}) {
 	my $r =$s->w32registry('CUser\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders');
@@ -1008,12 +1077,11 @@ sub w32umnu {		# Win32 User Menu Item policy
 					$_[0]->fpthmk($ff);
 				}
 				elsif (($ff =~/\.pif$/i) && Win32::IsWinNT()) {
+					my $f1 =$ff; $f1 =~s/\.pif$/\.lnk/i;
 					$_[0]->{-w32umnuH}->{lc($ff)} =1;
-					$ff =~s/\.pif$/\.lnk/i;
-					$_[0]->fcopy('-s' .$p, $_[1], $ff);
-					# my $me =Win32::Shortcut->new($ff);
-					# $me->Save($ff);
-					$_[0]->{-w32umnuH}->{lc($ff)} =1;
+					$_[0]->{-w32umnuH}->{lc($f1)} =1;
+					my $me =Win32::Shortcut->new($_[1]);
+					$me->Save($f1);
 				}
 				else {
 					$_[0]->fcopy('-s' .$p, $_[1], $ff);
@@ -1051,18 +1119,18 @@ sub banner {		# Echo banner
 	&{$s->{-banner}}($s);
  }
  elsif (scalar(@b) || $s->{-banner}) {
-	print "\n", '-' x $s->{-hrlen}, "\n" if $s->{-hrlen};
-	print scalar(@b) ? @b : $s->{-banner},"\n";
+	$s->echo("\n", '-' x $s->{-hrlen}) if $s->{-hrlen};
+	$s->echo(scalar(@b) ? @b : $s->{-banner});
  }
  if (!scalar(@b)) {
- print "  mngr= ", join('; ', map {(defined($s->{$_}) ? $s->{$_} : 'undef')
-	} qw (-mgrcall)), "\n";
- print "  host= ", join('; ', map {(defined($s->{$_}) ? $s->{$_} : 'undef')
-	} qw (-host -node -hostdom)), "\n";
- print "  user= ", join('; ', map {(defined($s->{$_}) ? $s->{$_} : 'undef')
-	} qw (-user -domain -dirmcf)), "\n";
+ $s->echo("  mngr= ", join('; ', map {(defined($s->{$_}) ? $s->{$_} : 'undef')
+	} qw (-mgrcall)));
+ $s->echo("  host= ", join('; ', map {(defined($s->{$_}) ? $s->{$_} : 'undef')
+	} qw (-host -node -hostdom)));
+ $s->echo("  user= ", join('; ', map {(defined($s->{$_}) ? $s->{$_} : 'undef')
+	} qw (-user -domain -dirmcf)));
  }
- print '-' x $s->{-hrlen}, "\n"	if $s->{-hrlen};
+ $s->echo('-' x $s->{-hrlen})	if $s->{-hrlen};
  1
 }
 
@@ -1134,9 +1202,9 @@ sub unames {		# Names of user
 			, $s->{-user})	if !$u || ($u eq '1');
  my $r;
  if ($s->{-dhu}) {
-	$r =$s->{-dhu}->{$u} ||$s->{-dhu}->{lc($u)};
-	$r =$s->{-dhu}->{$1} ||$s->{-dhu}->{lc($1)}
-		if !$r && ($u =~/[\\\/](.+)$/);
+	$r =$s->{-dhu}->{$u} || $s->{-dhu}->{lc($u)}
+		|| ((!$_[1] || ($_[1] eq '1')) && $s->{-dhu}->{lc($s->{-user} .'@' .($ENV{USERDNSDOMAIN} ||$s->{-hostdom} ||$s->{-host} ||''))})
+		|| (($u =~/[\\\/](.+)$/) && ($s->{-dhu}->{$1} ||$s->{-dhu}->{lc($1)}));
 	# $r =$s->{-dhu}->{lc($u)} =[$s->w32ugrps($u)]
 	#	if !$r && ($^O eq 'MSWin32') && Win32::IsWinNT();
 	$r =[]	if !$r;
@@ -1158,6 +1226,9 @@ sub unames {		# Names of user
 	: ($^O eq 'MSWin32') && Win32::IsWinNT()
 	? $s->w32ugrps($u)
 	: ()
+	, (!$_[1] || ($_[1] eq '1'))
+	? lc($s->{-user} .'@' .($ENV{USERDNSDOMAIN} ||$s->{-hostdom} ||$s->{-host} ||''))
+	: ()
 	]
 }
 
@@ -1166,15 +1237,16 @@ sub unames {		# Names of user
 sub nnames {		# Names of node
  my($s,$u) =@_;		# (?user) -> [names]
  $u =join('\\', map {$_ ? ($_) : ()
-			} ($^O eq 'MSWin32') && Win32::IsWinNT()
+			} ($^O eq 'MSWin32') && Win32::IsWinNT() 
+				&& ($_[0]->w32ver(1) >4)
 			? $s->w32ADSystemInfo->{DomainShortName}
 			: ()
 			, $s->{-node})	if !$u || ($u eq '1');
  my $r;
  if ($s->{-dhn}) {
-	$r =$s->{-dhn}->{$u} ||$s->{-dhn}->{lc($u)};
-	$r =$s->{-dhn}->{$1} ||$s->{-dhn}->{lc($1)}
-		if !$r && ($u =~/[\\\/](.+)$/);
+	$r =$s->{-dhn}->{$u} ||$s->{-dhn}->{lc($u)}
+	|| ((!$_[1] || ($_[1] eq '1')) && $s->{-dhn}->{lc($s->{-host})})
+	|| (($u =~/[\\\/](.+)$/) && ($s->{-dhn}->{$1} ||$s->{-dhn}->{lc($1)}));
 	# $r =$s->{-dhn}->{lc($u)} =[$s->w32ugrps($u .'$')]
 	#	if !$r && ($^O eq 'MSWin32') && Win32::IsWinNT();
 	$r =[] if !$r;
@@ -1196,9 +1268,16 @@ sub nnames {		# Names of node
 	: ($^O eq 'MSWin32') && Win32::IsWinNT()
 	? $s->w32ugrps($u .'$')
 	: ()
+	, (!$_[1] || ($_[1] eq '1')) && ($s->{-host} ne $s->{-node})
+	? $s->{-host}
+	: ()
+	, ($^O eq 'MSWin32') && $s->w32ver()
+	? join('.', $^O, @{$s->{-w32ver}}[4,1,2])
+	: $s->nodever()
+	? join('.', @{$s->{-nodever}}[0,2,3])
+	: ($^O)
 	]
 }
-
 
 
 sub w32ugrps {	# Win32 user groups
@@ -1210,9 +1289,10 @@ sub w32ugrps {	# Win32 user groups
  my @gp;			# group paths
  return(@gn) if Win32::IsWin95();
  eval('use Win32::OLE'); Win32::OLE->Option('Warn'=>0);
+ return(@gn) if $_[0]->w32ver(1) <5;
  if	($uif =~/^([^\\]+)\\(.+)/)	{ $uid =$1;	$uin =$2 }
  elsif	($uif =~/^([^@]+)\@(.+)/)	{ $uid =$2;	$uin =$1 }
- else					{ $uin =$uif;	
+ else					{ $uin =$uif;
 					  $uid =$_[0]->w32ADSystemInfo->{DomainShortName}
 						||Win32::NodeName()}
  my $oh =Win32::OLE->GetObject('WinNT://' .$uid .',domain');
@@ -1280,13 +1360,13 @@ sub dGet {		# Get assignment by ID
 sub dQuery {		# Query assignments
  my($s,$q,$n,$u) =@_;	# (category, node name, user name) -> [assignments]
 			# (-mcf), ('', system, user), startup, logon, runapp, logoff, shutdown
- $n ='(' .join('|', map {my $v =$_; $v =~s/([^\w\d])/\\$1/g; $v
+ $n ='(' .join('|', map {my $v =$_; $v =~s/([^\w\d])/\\$1/g; $v =~s/\\\\+/\\\\+/g; $v
 		} ref($n) ? @$n : @{$s->nnames($n)}) .')'
 	if $n && (ref($n) ne 'CODE');
- $u ='(' .join('|', map { my $v =$_; $v =~s/([^\w\d])/\\$1/g; $v
+ $u ='(' .join('|', map {my $v =$_; $v =~s/([^\w\d])/\\$1/g; $v =~s/\\\\+/\\\\+/g; $v
 		} ref($u) ? @$u : @{$s->unames($u)}) .')'
 	if $u && (ref($u) ne 'CODE');
- print "\ndQuery("
+ $s->echo("\ndQuery("
 	, !ref($s->{-dla}) && $s->{-dla} && $s->{-dca}
 	? "'load'"
 	: !defined($q)
@@ -1294,7 +1374,7 @@ sub dQuery {		# Query assignments
 	: "'$q'"
 	, ($n ? ", node~=$n" : '')
 	, ($u ? ", user~=$u" : '')
-	, ")\n";
+	, ")");
  return([]) 	if $n
 		&& $s->{-xnodes}
 		&& grep /^$n$/i, ref($s->{-xnodes}) ? @{$s->{-xnodes}} : $s->{-xnodes};
@@ -1342,6 +1422,8 @@ sub dQuery {		# Query assignments
 		$s->{-asgid} =$e->{-id};
 		next	if ($cn && $e->{-nodes} && !&$cn($s, $e, $e->{-nodes}))
 			|| ($cu && $e->{-users} && !&$cu($s, $e, $e->{-users}))
+			|| (defined($e->{-uadmin}) && (($e->{-uadmin}||0) ne ($s->{-uadmin}||0)))
+			|| (defined($e->{-ucon}) && (($e->{-ucon}||0) ne ($s->{-ucon}||0)))
 			|| (ref($e->{-cnd}) && !&{$e->{-cnd}}($s,$e))
 			|| ($cw && $e->{-since} && ($e->{-since} gt $cw));
 		if (!defined($q)) {
@@ -1378,8 +1460,11 @@ sub dQuery {		# Query assignments
 		}
 		elsif ($l =~/^[\s#]*[\r\n]/) {
 		}
-		elsif ($l =~/^(-hostdom|-domain)\s*[=>]+\s*['"]*([^\s\n\r'"]+)/) {
+		elsif ($l =~/^(-hostdom|-domain)\s*[=>]+\s*['"]*([^\s\n\r'"\/=>]+)/) {
 			$yd =(lc($2) eq 'all') ||(lc($2) eq lc($s->{$1}))
+		}
+		elsif ($l =~/^(-hostdom|-domain)\s*[=>]+\s*\/([^\s\n\r\/]+)/) {
+			$yd =$s->{$1} =~/$2/i;
 		}
 		elsif (!$yd) {
 		}
@@ -1458,6 +1543,9 @@ sub dQuery {		# Query assignments
 		elsif ($l =~/^-users\b/) {
 			$yu =0	if $u && ($l !~/['"]$u['"]/i);
 		}
+		elsif ($l =~/^(-uadmin|-ucon)\s*[=>]+\s*['"]*([^\s\n\r'"\/=>]+)/) {
+			$yu =0 if ($s->{$1}||'0') ne ($2 ||0);
+		}
 		elsif ($l =~/^-cnd\s*[=>]+\s*([^\n\r]+)/) {
 			my $v =$1;
 			   $v =$v =~/^sub\s*\{/ ? eval($v) : eval("sub{$v}");
@@ -1470,6 +1558,7 @@ sub dQuery {		# Query assignments
 	}
 	seek(FILE, 0, 0) || return($s->error("dQuery('seek','" .$s->{-dla} ."'): " .$s->erros));
 	my $hl;
+	$yd =1;
 	while (1) {
 		undef $!;
 		if (!defined($l =<FILE>)) {
@@ -1478,7 +1567,15 @@ sub dQuery {		# Query assignments
 		}
 		elsif ($l =~/^[\s#]*[\r\n]/) {
 		}
-		elsif ($l =~/^-id\s*[=>]+\s*['"]*([^\s\n\r'"]+)/) {
+		elsif ($l =~/^(-hostdom|-domain)\s*[=>]+\s*['"]*([^\s\n\r'"\/=>]+)/) {
+			$yd =(lc($2) eq 'all') ||(lc($2) eq lc($s->{$1}));
+			$hl =undef;
+		}
+		elsif ($l =~/^(-hostdom|-domain)\s*[=>]+\s*\/([^\s\n\r\/]+)/) {
+			$yd =$s->{$1} =~/$2/i;
+			$hl =undef;
+		}
+		elsif ($yd && ($l =~/^-id\s*[=>]+\s*['"]*([^\s\n\r'"]+)/)) {
 			$id =$1;
 			$s->{-asgid} =$id;
 			$hl =undef;
@@ -1939,8 +2036,7 @@ sub acRun {	# Assignment call run
  $s->meStore($ae)	if $op eq '-do';
  $s->meDel($ae)		if $op eq '-undo';
  return(1)		if !$ae->{$op};
- my $cmd =$ae->{$op};
-    $cmd =$1 if $cmd =~/^[!?](.*)/;
+ my ($cmf, $cmd) =$ae->{$op} =~/^([!?@]+)(.*)/ ? ($1, $2) : ('', $ae->{$op});
  local $ENV{SMLOG} =	  !$ae->{-under} ||($ae->{-under} =~/^(?:system)/)
 			? $s->{-dircrs} .$s->{-dirm} .$ae->{-id}
 			: $ae->{-under} =~/^(?:user)/
@@ -1948,22 +2044,45 @@ sub acRun {	# Assignment call run
 			: ($s->acRfm($ae->{-under}, $ae->{-id})
 				||($^O eq 'MSWin32' ? 'nul' : 'nil'));
  local $ENV{SMID}  =$ae->{-id};
- print $cmd,"\n";
+ $s->echo($cmd);
  my($r, $err);
  if ($cmd =~/^do\s(.+)$/) {
 	$cmd =$1;
-	$r =eval{$s->fread($cmd)};
-	if (!$r) {
-		$err ="do '$cmd': $@";
+	local ($SELF, $_, $SIG{__DIE__}) = ($s, $s, 'DEFAULT');
+	$r =eval "{package main; do '"
+		.(do{my $v =$cmd; $v =~s/\\/\\\\/g; $v =~s/'/\\'/g; $v})
+		."'}";
+	if (!defined($r) && $!) {
+		$err ="do '$cmd': $!";
 	}
-	elsif (!($r =eval("sub{$r}"))) {
-		$err ="do '$cmd': $@";
+	elsif (!defined($r) && $@) {
+		if ($cmf =~/\@/) {
+			$err ="do '$cmd': $@";
+		}
+		else {
+			warn("do '$cmd': $@");
+		}
 	}
-	elsif (!defined($r =eval{&$r($s, $ae)}||0)) {
-		$err ="do '$cmd': $@";
-	}
-	elsif (!$r) {
+	elsif (($r && ($cmf =~/\!/))
+	||    (!$r && ($cmf =~/\?/))) {
 		$err ="do '$cmd': " .(defined($r) ? $r : 'undef');
+	}
+ }
+ elsif ($cmd =~/^eval\s(.+)$/) {
+	$cmd =$r =$1;
+	local ($SELF, $_, $SIG{__DIE__}) = ($s, $s, 'DEFAULT');
+	$r =eval "{package main; $r}";
+	if (!defined($r) && $@) {
+		if ($cmf =~/\@/) {
+			$err ="eval '$cmd': $@";
+		}
+		else {
+			warn("eval '$cmd': $@");
+		}
+	}
+	elsif (($r && ($cmf =~/\!/))
+	||    (!$r && ($cmf =~/\?/))) {
+		$err ="eval '$cmd': " .(defined($r) ? $r : 'undef');
 	}
  }
  else {
@@ -1978,8 +2097,8 @@ sub acRun {	# Assignment call run
 		my $rc =($? >> 8);
 		$reg && $s->acReg($ae, '', '-exit=' .$rc);
 		$err ="system '$cmd': $rc"	# unsuccess
-			if 	(($ae->{$op} =~/^\?/) && $rc)
-			||	(($ae->{$op} =~/^\!/) && !$rc);
+			if 	(($cmf =~/\?/) && $rc)
+			||	(($cmf =~/\!/) && !$rc);
 	}
  }
  if ($err) {
@@ -2072,13 +2191,13 @@ sub alRun {	# Assignments list run
  }
  foreach my $ae (@$al1) {
 	local $s->{-asgid} =$ae->{-id};
-	print "\n"
+	$s->echo("\n"
 		, $ae->{-id}
 		, " ("
 		, $ae->{-under} ||'system'
 		, ") "
 		, $ae->{-cmt} ||$ae->{-do} ||($ae->{-doop} && join('; ', map {join(' ', @$_)} @{$ae->{-doop}})) ||''
-		, "\n";
+		);
 	$s->acRun($ae);
 	if ($ae->{-last}) {
 		$s->mesg('ok'
@@ -2173,7 +2292,7 @@ sub Run {	# Run module
 			if !$arg[2];
 		$s->Run(@arg[1..$#arg]);
 		$s->set(-runmode =>$arg[0]);
-		print "\n";
+		$s->echo();
 	}
 	$s->banner();
 	local $s->{-ymyn} =$s->{-yasg};
@@ -2289,7 +2408,7 @@ sub Run {	# Run module
 				$la =1;
 			}
 			elsif ($v) {
-				print "at $v /d $l";
+				$s->echo("at $v /d $l");
 				system("at $v /d")
 			}
 		}
@@ -2311,7 +2430,7 @@ sub Run {	# Run module
 				# .' ' .($ENV{COMSPEC} ||'cmd.exe')
 				# .' /c start "' .$s->{-prgcn} .' agent" /Dc:\\'
 				." $mgr agent apply";
-			print "$cmd\n";
+			$s->echo($cmd);
 			if (system($cmd) <0) {
 				return($s->error("$cmd: " .$s->erros))
 			}
@@ -2332,7 +2451,7 @@ sub Run {	# Run module
 		$t1 =$1 if $t1 =~/\s([^\s]+)/;
 		my $cmd ="at $t1 $mgr agent loop"
 			.($arg[2] && ($arg[2] =~/^\d+$/) ? ' ' .$arg[2] : '');
-		print "$cmd\n";
+		$s->echo($cmd);
 		if (system($cmd) <0) {
 			return($s->error("$cmd: " .$s->erros))
 		}

@@ -17,6 +17,10 @@ perl -w -x -S %0 %*
 #	perl smcmv.p -aTest	-tall		dir !elem!
 #	perl smcmv.p -l10	-tall		dir !elem!
 #	perl smcmv.p -ob -l10	-atest	-tall	dir !elem!
+#	perl smcmv.p cmdfile	command-file	?history-file	?redirect-log-file
+#	perl smcmv.p regask	?start-sample	?end-sample	all|dirs|errors|pids|expr
+#	perl smcmv.p logask	?start-sample	?end-sample	all|errors|pids|regexp
+#	perl smcmv.p logask	-1day		/error/i
 #
 # Options:
 #	-kNameSpace	- kind (namespace) of command
@@ -41,7 +45,6 @@ perl -w -x -S %0 %*
 #
 # Predefined commands:
 #	see 'smrmt' script: 'rcmd', 'rdo', 'fput', 'fget', 'mput', 'mget' with options.
-#	see 'cmdfile', 'cmdstat'.
 #
 use Sys::Manage::Cmd;
 $s =Sys::Manage::Cmd->new(-cfg=>1);
