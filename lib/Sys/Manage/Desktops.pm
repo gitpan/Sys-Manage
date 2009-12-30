@@ -5,17 +5,8 @@
 # makarow, 2007-10-04
 #
 #
-# ToDo, see also '???'
-# - testing
+# ToDo (see also '???', '!!!' in the source code):
 # - timeout of scripts (startup, logon) should be considered
-# = echo() to log file; test file close, agent modes
-# + regexp -hostdom
-# + add -hostdom to default unames() and nnames()
-# + -hostdom for assignments text file
-# + errinfo() for NETLCK
-# + -atoy=>30 due to NETLCK
-# + NETLCK preventing network lost
-# + startup -atoy=>10, 15 margin experimented, why?
 #
 
 package Sys::Manage::Desktops;
@@ -24,7 +15,7 @@ use strict;
 use Carp;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK $SELF);
-$VERSION = '0.62';
+$VERSION = '1.0';
 
 
 if ($^O eq 'MSWin32') {
@@ -242,7 +233,7 @@ sub erros {		# Format OS error message
  .($v && ($^O eq 'MSWin32') # && ($! ==13) # Permission denied
    && ($v =~/^[<>]*(\\\\[^\\]+\\[^\\]+)/)
    && (!-e $1)
- ? " ('$1': $!)"
+ ? " ('$1': $! " .($^E ? "/ $^E" : '') .")"
  : '');
 }
 
@@ -270,10 +261,20 @@ sub timeadd {	# Adjust time to years, months, days,...
 }
 
 
-sub con2gui {
+sub os2con {
+ return($_[1])
+	if !(($_[0]->{-lang} eq 'ru') && ($^O eq 'MSWin32'));
  my $v =$_[1];
- $v =~tr/€‚ƒ„…ð†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™œ›šžŸ ¡¢£¤¥ñ¦§¨©ª«¬­®¯àáâãäåæçèéìëêíîï/ÀÁÂÃÄÅ¨ÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖ×ØÙÜÛÚÝÞßàáâãäå¸æçèéêëìíîïðñòóôõö÷øùüûúýþÿ/
-	if $_[0]->{-lang} eq 'ru';
+ $v =~tr/ÀÁÂÃÄÅ¨ÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖ×ØÙÜÛÚÝÞßàáâãäå¸æçèéêëìíîïðñòóôõö÷øùüûúýþÿ/€‚ƒ„…ð†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™œ›šžŸ ¡¢£¤¥ñ¦§¨©ª«¬­®¯àáâãäåæçèéìëêíîï/;
+ $v
+}
+
+
+sub con2eml {
+ return($_[1])
+	if !(($_[0]->{-lang} eq 'ru') && ($^O eq 'MSWin32'));
+ my $v =$_[1];
+ $v =~tr/€‚ƒ„…ð†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™œ›šžŸ ¡¢£¤¥ñ¦§¨©ª«¬­®¯àáâãäåæçèéìëêíîï/áâ÷çäå³öúéêëìíîïðòóôõæèãþûýøùÿüàñÁÂ×ÇÄÅ£ÖÚÉÊËÌÍÎÏÐÒÓÔÕÆÈÃÞÛÝØÙßÜÀÑ/;
  $v
 }
 
@@ -310,7 +311,7 @@ sub error {		# Error final
 		: !ref($s->{-support}) eq 'CODE'
 		? &{$s->{-support}}($s,$e)
 		: $s->{-support}
-		, $e);
+		, $s->os2con($e));
  }
  else {
 	local $|=1;
@@ -340,7 +341,7 @@ sub errhndl {		# Error handler
 		: !ref($s->{-support}) eq 'CODE'
 		? &{$s->{-support}}($s,$e)
 		: $s->{-support}
-		,$e)
+		,$s->os2con($e))
  }
  return
 }
@@ -356,11 +357,11 @@ sub echofo {	# Open echo log file
  my $fh;
  {	local $_[0]->{-echof}=undef;
 	if (!eval('use Symbol; 1')) {
-		return($_[0]->error("Using 'Symbol':" .$_[0]->erros()))
+		return($_[0]->error("echofo(): use 'Symbol' -> " .$_[0]->erros()))
 	}
 	elsif (!open($fh =Symbol::gensym(), ">$fn")) {
 		$fh =undef;
-		return($_[0]->error("Creating '$fn':" .$_[0]->erros()))
+		return($_[0]->error("echofo(): open('>$fn') -> " .$_[0]->erros()))
 	}
  }
  $_[0]->{-echof} =$fh;
@@ -460,14 +461,14 @@ sub smtpsend {		# SMTP mail
  elsif (!$smtp->to(ref($to) 
 	? @$to 
 	: $to))			{warn("SMTP to $to")}
- elsif (!$smtp->data(join("\n"
+ elsif (!$smtp->data($s->con2eml(join("\n"
 	, "From: $from"
 	, "To: " .join(', ', ref($to) 
 			? @$to 
 			: $to)
 	, "Subject: $subj"
 	, ""
-	, @msg)))		{warn("SMTP data")}
+	, @msg))))		{warn("SMTP data")}
  elsif (!$smtp->dataend())	{warn("SMTP dataend")}
  elsif (!$smtp->quit)		{}
  1
@@ -479,7 +480,7 @@ sub fwrite {		# Store file
  my $s =shift;		# ('-b',filename, strings) -> success
  my $o =$_[0] =~/^-/ ? shift : '-';
  my $f =$_[0]; $f ='>' .$f if $f !~/^[<>]/;
- local *FILE;  open(FILE, $f) || return($s->error("fwrite('open','$f'): " .$s->erros($f)));
+ local *FILE;  open(FILE, $f) || return($s->error("fwrite('open','$f') -> " .$s->erros($f)));
  my $r =undef;
  if ($o =~/b/) {
 	binmode(FILE);
@@ -489,7 +490,7 @@ sub fwrite {		# Store file
 	$r =print FILE join("\n",@_[1..$#_])
  }
  close(FILE);
- $r || $s->error("fwrite('write','$f'): " .$s->erros($f))
+ $r || $s->error("fwrite('write','$f') -> " .$s->erros($f))
 }
 
 
@@ -504,12 +505,12 @@ sub fread {		# Load file
  my($f,$f0) =($_[0],$_[0]); 
 	if ($f =~/^[<>]+/)	{$f0 =$'}
 	else			{$f  ='<' .$f}
- local *FILE;  open(FILE, $f) || return($s->error("fread('open','$f'): " .$s->erros($f0)));
+ local *FILE;  open(FILE, $f) || return($s->error("fread('open','$f') -> " .$s->erros($f0)));
  my $b =undef;
  binmode(FILE) if $o =~/b/;
  my $r =read(FILE,$b,-s $f0);
  close(FILE);
- defined($r) ? $b : $s->error("fread('read','$f'): " .$s->erros($f0))
+ defined($r) ? $b : $s->error("fread('read','$f') -> " .$s->erros($f0))
 }
 
 
@@ -596,7 +597,7 @@ sub fpthmk {    # Create directory if needed
 		mkdir($a, 0777) ||return($_[0]->error("fpthmk("
 		.($a eq $_[1] ? "'$a'" : "'$a','$_[1]'")
 		.(do{my @v =caller(1); @v ? join(',', '', map {!defined($_) ? () : $_ =~/^\d+$/ ? $_ : "'$_'"} @v[1..3]) : ''})
-		."): " .$_[0]->erros($a)));
+		.") -> " .$_[0]->erros($a)));
 	}
 	$a .=$m
  }
@@ -629,7 +630,7 @@ sub fcopy {	# Copy files
 	($^O eq 'MSWin32'
 	? Win32::CopyFile($s0, $t1, 1)
 	: (eval('use File::Copy (); 1') && File::Copy::syscopy($s0, $t1)))
-	|| ($o =~/i/ ? 0 : $s->error("fcopy($s0, $t1): " .$s->erros($t1)))
+	|| ($o =~/i/ ? 0 : $s->error("fcopy('$s0', '$t1') -> " .$s->erros($t1)))
  }
  else {
 	my ($p, $m);
@@ -649,7 +650,7 @@ sub fcopy {	# Copy files
 		($p, $m) =($s0, '*');
 		$s->fpthmk($t0);
 	}
-	return($o =~/i/ ? 0 : $s->error("fcopy($o, $s0, $t0) -> source dir not found\n"))
+	return($o =~/i/ ? 0 : $s->error("fcopy('$o', '$s0', '$t0') -> source dir not found\n"))
 		if !-d $p;
 	my $r =0;
 	foreach my $e ($s->fglob($p .$s->{-dirm} .$m)) {
@@ -825,6 +826,7 @@ sub w32srv {		# Win32 is Server or DC?
 
 
 sub w32oleerr {		# Win32 OLE last error message
+
  (Win32::OLE->LastError()||'undef') 
 	.' ' 
 	.(Win32::OLE->LastError() && Win32::FormatMessage(Win32::OLE->LastError()) ||'undef')
@@ -900,7 +902,7 @@ sub w32regenu {		# Win32 Registry enumeration of users
  my $key =$s->{-prgcn};
  my ($erc,$err);
  local $_;
- return($s->error("w32regenu: MSWin32 required\n"))
+ return($s->error("w32regenu() -> MSWin32 required\n"))
 	if $^O ne 'MSWin32';
  $s->w32registry();
  if (Win32::IsWin95()) {
@@ -913,12 +915,12 @@ sub w32regenu {		# Win32 Registry enumeration of users
 	return($s->error($erc)) if $erc;
 	return(1);
  }
- return($s->error("w32regenu: Windows NT required\n"))
+ return($s->error("w32regenu() -> Windows NT required\n"))
 	if !Win32::IsWinNT();
  my $prd =	  ($ENV{ALLUSERSPROFILE} ||$ENV{USERPROFILE} ||'') =~/^(.+?)[\\\/][^\\\/]+$/
 		? $1
 		: ($ENV{SystemRoot} .'\\Profiles');
- return($s->error("w32regenu: '$prd' profiles dir not found\n"))
+ return($s->error("w32regenu() -> '$prd' profiles dir not found\n"))
 	if !-d $prd;
  my %prs;
  $Win32::TieRegistry::Registry->AllowLoad(1);
@@ -1352,7 +1354,7 @@ sub dGet {		# Get assignment by ID
 	return($s->{-dha}->{$_[1]})
  }
  else {
-	return($_[0]->error('dGet(): No assignments datastore'));
+	return($_[0]->error('dGet() -> No assignments datastore'));
  }
 }
 
@@ -1439,7 +1441,7 @@ sub dQuery {		# Query assignments
  }
  elsif ($s->{-dla}) {
 	local *FILE;
-	open(FILE, $s->{-dla}) || return($s->error("dQuery('open','" .$s->{-dla} ."'): " .$s->erros));
+	open(FILE, $s->{-dla}) || return($s->error("dQuery('open','" .$s->{-dla} ."') -> " .$s->erros));
 	my ($qu, $qm) =$s->{-dca} ||!defined($q)
 			? ()
 			: $q eq '-mcf'
@@ -1452,7 +1454,7 @@ sub dQuery {		# Query assignments
 	while (1) {
 		undef $!;
 		if (!defined($l =<FILE>)) {
-			return($s->error("dQuery('readline'): " .$s->erros)) if $!;
+			return($s->error("dQuery('readline') -> " .$s->erros)) if $!;
 			$yq =	!defined($qu) ? !$qm : (!$qu || ($qu eq 'system'))
 				if !defined($yq);
 			$ha->{$id} =1 if $id && $yq && $yn && $yu && $yc;
@@ -1472,7 +1474,7 @@ sub dQuery {		# Query assignments
 			if ($n && ($l =~/^-dhn\s*[=>]+\s*[\['"]*$n\b/i)) {
 				my $v =($l =~/^-\w+\s*[=>]+\s*([^\n\r]+)/i) && $1;
 				$v =$v=~/^[\[]/ ? eval($v) : $v=~/^["']/ ? eval("[$v]") : [split /\s*[,;]\s*/, $v];
-				return($s->error("dQuery('$l'): $@")) if !defined($v);
+				return($s->error("dQuery('$l') -> $@")) if !defined($v);
 				$s->{-dhn} ={$v->[0]=>[ref($s->{-dhn}) && $s->{-dhn}->{$v->[0]}
 					? @{$s->{-dhn}->{$v->[0]}}
 					: ()
@@ -1485,7 +1487,7 @@ sub dQuery {		# Query assignments
 			if ($u && ($l =~/^-dhu\s*[=>]+\s*[\['"]*$u\b/i)) {
 				my $v =($l =~/^-\w+\s*[=>]+\s*([^\n\r]+)/i) && $1;
 				$v =$v=~/^[\[]/ ? eval($v) : $v=~/^["']/ ? eval("[$v]") : [split /\s*[,;]\s*/, $v];
-				return($s->error("dQuery('$l'): $@")) if !defined($v);
+				return($s->error("dQuery('$l') -> $@")) if !defined($v);
 				$s->{-dhu} ={$v->[0]=>[ref($s->{-dhu}) && $s->{-dhu}->{$v->[0]}
 					? @{$s->{-dhu}->{$v->[0]}}
 					: ()
@@ -1512,7 +1514,7 @@ sub dQuery {		# Query assignments
 					: $v =~/^["']/
 					? eval($v)
 					: split /\s*[,;]\s*/, $v) {
-					return($s->error("dQuery('$l'): $@")) if !defined($e);
+					return($s->error("dQuery('$l') -> $@")) if !defined($e);
 					$hr->{$e} =1;
 				}
 			}
@@ -1522,7 +1524,7 @@ sub dQuery {		# Query assignments
 				$l =~/^-[\w\d]+\s*[=>]+\s*([^\n\r]+)/;
 				my $v =$1;
 				foreach my $e (@{eval($v =~/^\[\[/ ? $v : "[$v]")}) {
-					return($s->error("dQuery('$l'): $@")) if !defined($e);
+					return($s->error("dQuery('$l') -> $@")) if !defined($e);
 					$hr->{$e->[1]} =1;
 				}
 			}
@@ -1549,20 +1551,20 @@ sub dQuery {		# Query assignments
 		elsif ($l =~/^-cnd\s*[=>]+\s*([^\n\r]+)/) {
 			my $v =$1;
 			   $v =$v =~/^sub\s*\{/ ? eval($v) : eval("sub{$v}");
-			return($s->error("dQuery('$l'): $@")) if !defined($v);
+			return($s->error("dQuery('$l') -> $@")) if !defined($v);
 			$yc =0 if !&$v($s);
 		}
 		elsif ($l =~/^-since\s*[=>]+\s*['"]*([^\s\n\r'"]+)/) {
 			$yt =0 if $1 gt $cw;
 		}
 	}
-	seek(FILE, 0, 0) || return($s->error("dQuery('seek','" .$s->{-dla} ."'): " .$s->erros));
+	seek(FILE, 0, 0) || return($s->error("dQuery('seek','" .$s->{-dla} ."') -> " .$s->erros));
 	my $hl;
 	$yd =1;
 	while (1) {
 		undef $!;
 		if (!defined($l =<FILE>)) {
-			return($s->error("dQuery('readline'): " .$s->erros)) if $!;
+			return($s->error("dQuery('readline') -> " .$s->erros)) if $!;
 			last
 		}
 		elsif ($l =~/^[\s#]*[\r\n]/) {
@@ -1605,7 +1607,7 @@ sub dQuery {		# Query assignments
 			else {
 				$hl->{$k} =$v;
 			}
-			return($s->error("dQuery('readattr', '$k', '$v'): $@"))
+			return($s->error("dQuery('readattr', '$k', '$v') -> $@"))
 				if !defined($hl->{$k}) && $@;
 		}
 	}
@@ -1629,7 +1631,7 @@ sub dQuery {		# Query assignments
 	}
  }
  else {
-	return($s->error('dQuery(): No assignments datastore'));
+	return($s->error('dQuery() -> No assignments datastore'));
  }
  $r
 }
@@ -1731,7 +1733,7 @@ sub meStore {	# Store menu element(s)
 	.($mnu->{-mcf} ? '-' .$mnu->{-mcf} : '')
 	.($^O eq 'MSWin32' ? '.bat' : ''));
  my $mef =$s->mePath($ass,$mnu->{Name});
- return($s->error("meStore('" .$ass->{-id} ."'): Empty menu item name")) if !$mef;
+ return($s->error("meStore('" .$ass->{-id} ."') -> Empty menu item name")) if !$mef;
  ($mef =~/[\\\/][^\\\/]+$/) && $s->fpthmk($`);
  my $r;
  if ($^O eq 'MSWin32') {
@@ -1772,11 +1774,11 @@ sub meDel {	# Delete menu element(s)
 	return(1)
  }
  my $mef =$s->mePath($ass,$mnu->{Name});
- return($s->error("meDel('" .$ass->{-id} ."'): Empty menu item name")) if !$mef;
+ return($s->error("meDel('" .$ass->{-id} ."') -> Empty menu item name")) if !$mef;
  $mef .='.lnk' if ($mef !~/\.(?:lnk|pif)$/i) && ($^O eq 'MSWin32');
  -e $mef
  ? unlink($mef)
-	||$s->error("unlink('$mef'): " .$s->erros)
+	||$s->error("unlink('$mef') -> " .$s->erros)
  : 1;
  if ($mef =~/(.+)[\\\/][^\\\/]+$/) {
 	rmdir($1)	# empty folder only, ignoring errors
@@ -1895,10 +1897,10 @@ sub acRegDel {	# Assignment call registration delete
 	return(0) if $st[9] && ($s->strtime($st[9]) gt $ast);
  }
  unlink($fm)
-	||($^W && warn("unlink('$fm'): " .$s->erros))
+	||($^W && warn("unlink('$fm') -> " .$s->erros))
 	if $fm && (-e $fm);
  unlink($f)
-	||$s->error("unlink('$f'): " .$s->erros);
+	||$s->error("unlink('$f') -> " .$s->erros);
 }
 
 
@@ -1920,7 +1922,7 @@ sub acRegRen {	# Assignment call register rename
  }
  ((!-e $f2) || unlink($f2))
  && (rename($f1, $f2))
-	||$s->error("rename('$f1','$f2'): " .$s->erros);
+	||$s->error("rename('$f1','$f2') -> " .$s->erros);
 }
 
 
@@ -2004,7 +2006,7 @@ sub acRun {	# Assignment call run
 	my $x =1;
 	foreach my $e (@{$ae->{-doop}}) {
 		my $e1 =$s->dGet($e->[1]);
-		return($s->error("acRun(): not found '" .$e->[1] ."' assignment"))
+		return($s->error("acRun() -> not found '" .$e->[1] ."' assignment"))
 			if !$e1;
 		$s->acRun($e1, $e->[0], $#$e >1 ? @$e[2..$#$e] : ());
 		$x =0	if ($e->[0] !~/(?:-redo|-unreg)/)
@@ -2027,7 +2029,7 @@ sub acRun {	# Assignment call run
  elsif (($op !~/^(?:-do|-undo)/)
 	||(!$ae->{$op} &&($op =~/^(?:-undo)/))
 		) {
-	return($s->error('acRun(): Unimplemented ' .$ae->{-id} .'{' .$op .'}'));
+	return($s->error('acRun() -> Unimplemented ' .$ae->{-id} .'{' .$op .'}'));
  }
 
  my $reg =($op eq '-do') && (!$ae->{-under} ||($ae->{-under} =~/^(?:system|user)/));
@@ -2263,7 +2265,7 @@ sub Run {	# Run module
 	print "\t'logon', 'logoff', 'shutdown'.\n";
 	print "Non-obvious Desktop Run Modes:\n";
 	print "\t'runapp'; 'agent' ('start'|'stop'|'loop'|'apply') minutes.\n";
-	return($s->error("Run(): run mode required"));
+	return($s->error("Run() -> run mode required"));
  }
  $s->set(-runmode =>$arg[0]);
  $s->errinfo(join('; ', map {defined($s->{$_}) ? ($_ .'=' .$s->{$_}) : ()
@@ -2348,11 +2350,11 @@ sub Run {	# Run module
  elsif ($s->{-runmode} eq 'agent') {
 	# (start | stop | loop | apply | say), minutes
 	$s->banner();
-	return($s->error('Run(): No agent option'))
+	return($s->error('Run() -> No agent option'))
 		if !$arg[1] || !($^O eq 'MSWin32') 
 		|| !Win32::IsWinNT();
 	if ($arg[1] eq 'say') {
-		return($s->error('Run(): node name required'))
+		return($s->error('Run() -> node name required'))
 			if !$arg[2];
 		return($s->conn($arg[2]
 			, $arg[3] && ($arg[3] eq 'agent')
@@ -2368,19 +2370,19 @@ sub Run {	# Run module
 			  ,'at']))
 	}
 	elsif ($arg[1] eq '-unreg') {
-		return($s->error('Run(): assignment id required'))
+		return($s->error('Run() -> assignment id required'))
 			if !$arg[2];
 		my $ae =$s->dGet($arg[2]);
-		return($s->error("Run(): not found '" .$arg[2] ."' assignment"))
+		return($s->error("Run() -> not found '" .$arg[2] ."' assignment"))
 			if !$ae;
 		$s->acRegDir('system');
 		return($s->acRegDel($ae));
 	}
 	elsif ($arg[1] eq '-redo') {
-		return($s->error('Run(): assignment id required'))
+		return($s->error('Run() -> assignment id required'))
 			if !$arg[2];
 		my $ae =$s->dGet($arg[2]);
-		return($s->error("Run(): not found '" .$arg[2] ."' assignment"))
+		return($s->error("Run() -> not found '" .$arg[2] ."' assignment"))
 			if !$ae;
 		$s->acRegDir('system');
 		$s->acRegDel($ae);
@@ -2432,7 +2434,7 @@ sub Run {	# Run module
 				." $mgr agent apply";
 			$s->echo($cmd);
 			if (system($cmd) <0) {
-				return($s->error("$cmd: " .$s->erros))
+				return($s->error("$cmd -> " .$s->erros))
 			}
 		}
 	}
@@ -2453,7 +2455,7 @@ sub Run {	# Run module
 			.($arg[2] && ($arg[2] =~/^\d+$/) ? ' ' .$arg[2] : '');
 		$s->echo($cmd);
 		if (system($cmd) <0) {
-			return($s->error("$cmd: " .$s->erros))
+			return($s->error("$cmd -> " .$s->erros))
 		}
 	}
  }

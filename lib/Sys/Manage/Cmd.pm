@@ -4,9 +4,9 @@
 #
 # makarow, 2005-09-09
 #
-# !!! ??? see in source code.
+# ToDo (see also '???', '!!!' in the source code):
 # ??? switch on var files fault tolerance?
-# ??? ejecting logfiles?
+# ??? auto limit log files?
 #
 
 package Sys::Manage::Cmd;
@@ -20,7 +20,7 @@ use POSIX qw(:sys_wait_h);
 use Data::Dumper;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.62';
+$VERSION = '1.0';
 
 1;
 
@@ -114,7 +114,7 @@ sub initialize {	# Initialize newly created object
 	#-cbranch	=>undef		# -b	# cmd order branch name (in -o)
 	#-ctarget	=>'all'		# -t	# cmd target(s)
 	#-cxtgt		=>[]		# -x	# cmd target exclusions
-	#-cuser		=>undef		# -u	# cmd user:password
+	#-cnsum		=>undef		# -c	# cmd conclusion target	#-cuser		=>undef		# -u	# cmd user:password
 	#-cignor	=>undef		# -i	# cmd exit code ignoring
 	#-esc		=>undef		# -esc	# cmd line escaped
 	,-cline		=>[]		# ...	# cmd line
@@ -187,6 +187,7 @@ sub set {               # Get/set slots of object
 		: $n eq '-g'	? '-ping'
 		: $n eq '-gx'	? (!$v || ($v=~/^[\d\w]$/i) ? '-vgxi' : '-vgxf')
 		: $n eq '-v'	? '-echo'
+		: $n eq '-c'	? '-cnsum'
 		: $n;
 	delete $opt{$k};
 	$opt{$n} =$v
@@ -239,6 +240,9 @@ sub set {               # Get/set slots of object
 		: exists($opt{-cxtgt})
 		? do{$opt{-cxtgt} =[$opt{-cxtgt},$v]}
 		: do{$opt{-cxtgt} =$v};
+	}
+	elsif ($arg->[$i] =~/^-c(.*)$/i) {
+		$opt{-cnsum} =$1 || 'complete'
 	}
 	elsif ($arg->[$i] =~/^-u(.*)$/i) {
 		$opt{-cuser} =$1	if $1 && !exists $opt{-cuser}
@@ -486,7 +490,7 @@ sub error {		# Error finish
 sub logask {		# Echo log query
  my $s =shift;		# (-opt, start, end, on row, on end)
 			# >, >=, <, <=, 'v'erbose, 's'calar
-			# 'pid's, 'err'ors, 'all'
+			# 'pid's, 'err'ors, 'warn'ings and errors, 'all'
  my $o =$_[0] && (($_[0] eq '-') || ($_[0] =~/^-[^\d]/i)) ? shift : '-v';
  my $ds=$_[0] && ($_[0] =~/^[-\d]/) ? shift : undef;
  my $de=$_[0] && ($_[0] =~/^[-\d]/) ? shift : undef;
@@ -573,7 +577,7 @@ sub logask {		# Echo log query
 				}
 				delete $rq{$id}
 			}
-			elsif (!$rq{$id}) {
+			elsif (!defined($rq{$id})) {
 				$rq{$id} =$_
 			}
 			elsif (/[\]:]\s+(?:Start\w*)[\[:]/i) {
@@ -584,8 +588,39 @@ sub logask {		# Echo log query
 			}
 		}
 		if (/\b(?:Error|CmdExcess|Exit\w*:\s+[1-9]+|Backlogs:\s+[1-9]+)\b/i) {
-			$_[1] =$rq{$id} .$_[1] if $id && $rq{$id} && $_[1] ne $rq{$id};
-			delete $rq{$id};
+			$_[1] =$rq{$id} .$_[1] if $id && $rq{$id} && ($_[1] ne $rq{$id});
+			$rq{$id} ='' if $id;
+			return($_[1])
+		} 0};
+ }
+ elsif ($q1 =~/^warn/) {
+	$q1=sub{if (/^\d{2,4}-\d\d-\d\d\s+\d\d:\d\d:\d\d\s+\[(\d+)\]/){
+			$id =$1;
+			if (/[\]:]\s+(?:End|Exit)\w*[\[:]/i) {
+				if (/\b(?:Error|Warning|Warn|Exit\w*:\s+[1-9]+|End\w*:\s+[1-9])\b/i) {
+					$_[1] =$rq{$id} .$_[1] if $rq{$id};
+					delete $rq{$id};
+					return($_[1])
+				}
+				else {
+					delete $rq{$id};
+					return('')
+				}
+				delete $rq{$id}
+			}
+			elsif (!defined($rq{$id})) {
+				$rq{$id} =$_
+			}
+			elsif (/[\]:]\s+(?:Start\w*)[\[:]/i) {
+				$rq{$id} =$_;
+			}
+			elsif (/[\]:]\s+(?:Logging)[\[:]/) {
+				$rq{$id} .=$_ if $rq{$id};
+			}
+		}
+		if (/\b(?:Error|Warning|Warn|CmdExcess|Exit\w*:\s+[1-9]+|Backlogs:\s+[1-9]+)\b/i) {
+			$_[1] =$rq{$id} .$_[1] if $id && $rq{$id} && ($_[1] ne $rq{$id});
+			$rq{$id} ='' if $id;
 			return($_[1])
 		} 0};
  }
@@ -604,7 +639,7 @@ sub logask {		# Echo log query
 					return('')
 				}
 			}
-			elsif (!$rq{$id}) {
+			elsif (!defined($rq{$id})) {
 				$rq{$id} =$_
 			}
 			elsif (/[\]:]\s+(?:Start\w*)[\[:]/i) {
@@ -615,8 +650,8 @@ sub logask {		# Echo log query
 			}
 		}
 		if (&$q0(@_)) {
-			$_[1] =$rq{$id} .$_[1] if $id && $rq{$id} && $_[1] ne $rq{$id};
-			delete $rq{$id};
+			$_[1] =$rq{$id} .$_[1] if $id && $rq{$id} && ($_[1] ne $rq{$id});
+			$rq{$id} ='' if $id;
 			return($_[1])
 		} 0};
  }
@@ -661,7 +696,7 @@ sub logask {		# Echo log query
 sub regask {		# Registrations query
  my $s =shift;		# (-opt, start, end, on row, on end)
 			# >, >=, <, <=, 'v'erbose, 's'calar
-			# 'pid's, 'err'ors, 'dir's, 'all'
+			# 'pid's, 'err'ors, 'warn'ings and errors, 'dir's, 'all'
  my $o =$_[0] && (($_[0] eq '-') || ($_[0] =~/^-[^\d]/i)) ? shift : '-v';
  my $ds=$_[0] && ($_[0] =~/^[-\d]/) ? shift : undef;
  my $de=$_[0] && ($_[0] =~/^[-\d]/) ? shift : undef;
@@ -698,7 +733,7 @@ sub regask {		# Registrations query
  elsif ($q1 =~/^pid/i) {
 	$q1 =sub{/-(?:go|run)\.txt$/i};
  }
- elsif ($q1 =~/^err/i) {
+ elsif ($q1 =~/^(?:err|warn)/i) {
 	$q1 =sub{/-(?:erg|err)\.txt$/i};
  }
  else {
@@ -1576,7 +1611,73 @@ sub execute {		# Execute command (target action) with current options
 		}
 	}
  }
- if (@$errc) {
+ if (!$s->{-cbranch} && $s->{-cnsum}) {		# Summary script run
+	$ENV{SMELEM} =$s->{-cnsum};
+	$ENV{SMLOG}  =$dir;
+	my $cme =[@$cmd];
+	shift @$cme if $cme->[0] =~/^(?:rdo|ldo)$/;
+	my $a =$s->dsmd(-assoc=>lc($cme->[0]))
+			|| (($cme->[0] =~/([^\\\/]+)$/)
+				&& $s->dsmd(-assoc=>lc($1)))
+			|| (($cme->[0] =~/(\.[^\\\/.]+)$/)
+				&& $s->dsmd(-assoc=>lc($1)));
+	unshift @$cme, @$a if $a && $a->[0];
+	$s->cmsubst($cme, '(elem|host|node|target)', $ENV{SMELEM});
+	$s->cmsubst($cme, '(log)', $ENV{SMLOG});
+	$s->echolog($$,'Complete','',join(' ', $s->qclad(@$cme)));
+	my ($hp, $hw, $hr, $ht);
+	if (0) {
+		$hp =eval('use IPC::Open3; 1') && (eval{IPC::Open3::open3($hw, $hr, $hr, @$cme)});
+		!$hp && return($s->error($$,'','',"cannot use IPC::Open3::open3: $@"));
+	}
+	elsif (1) {
+		$hr =eval('use IO::File; IO::File->new()');
+		$ht =$hr && eval('use File::Temp; new File::Temp()');
+		!$ht && return($s->error($$,'','',"cannot use File::Temp: $@"));
+		$ht && $s->echolog($$,'','','File::Temp ',$ht->filename());
+		if ($ht) {
+			foreach my $f (sort glob($ENV{SMLOG} .$s->{-dirm} .'*.*')) {
+				print $ht $s->fload($f);
+			}
+		}
+		$hp =$ht && open($hr, '-|', join(' ', $s->qclad(@$cme), '<', $s->qclad($ht->filename())));
+		!$hp && return($s->error($$,'','',"cannot open '-|': $!"));
+	}
+	else {
+		$hw =eval('use IO::File; IO::File->new()');
+		$hp =$hw && open($hw, '|-', join(' ', $s->qclad(@$cme)));
+		!$hp && return($s->error($$,'','',"cannot open '|-': $!"));
+	}
+	if ($hp) {
+		if ($hw && (eval{$hw->fileno()})) {
+			foreach my $f (sort glob($ENV{SMLOG} .$s->{-dirm} .'*.*')) {
+				my ($hf,$r);
+				$hf =eval('use IO::File; IO::File->new()');
+				$hf && $hf->open("<$f")
+					||return($s->error($$,'','',"cannot open '<$f': $!"));
+				while(defined($r =readline($hf))) {
+					$hw->print($r);
+				}
+				$hf->close();
+			}
+			$hw->printflush("\n");
+			$hw->close();
+			close($hw);
+		}
+		if ($hr && (eval{$hr->fileno()})) {
+			my $r;
+			while (defined($r =readline($hr))) {
+				$s->echolog($$,'','',$r);
+			}
+			$hr->close();
+		}
+		if ((waitpid($hp,0) >0) 
+		&& !$s->{-cignor} && ($?>>8)) {
+			$errc->[0] =($errc->[0] ||0) +1
+		}
+	}
+ }
+ if (@$errc) {					# Result output
 	$s->{-cerr} =$errc;
 	$s->vgxf('s') if $s->{-vgxf} && !$s->{-cpause};
 	$s->echolog($$,'Backlogs',''

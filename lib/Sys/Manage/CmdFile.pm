@@ -4,7 +4,8 @@
 #
 # makarow, 2005-10-30
 #
-# !!! see in source code
+# ToDo (see also '???', '!!!' in the source code):
+# -
 # 
 
 package Sys::Manage::CmdFile;
@@ -16,7 +17,6 @@ use IO::File;
 use Fcntl qw(:DEFAULT :flock :seek :mode);
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.62';
 
 1;
 

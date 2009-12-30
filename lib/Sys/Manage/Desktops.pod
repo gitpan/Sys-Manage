@@ -1202,7 +1202,6 @@ To configure C<startup> and C<logon> scripts.
 
 =over
 
-=over
 
 =item Limitations, Bugs, Problems
 
@@ -1221,7 +1220,7 @@ Startup or logon scripts may be liable to timeouts
 or may became hidden from user, 
 so response timeouts used interacting with user.
 
-See also at the top of the source code.
+See at the top of the source code.
 
 
 =back
@@ -1229,6 +1228,11 @@ See also at the top of the source code.
 =head1 VERSION
 
 =over
+
+=item '2009-12-08'
+
+Translating OS codepage to console, console codepage to e-mail
+for $^O eq 'MSWin32' and C<-lang> eq 'ru'.
 
 
 =item '2009-04-22'
@@ -1311,7 +1315,7 @@ under the same terms as Perl itself.
 
 =head1 AUTHOR
 
-Andrew V Makarow <makarow at mail.com>, for zhenya
+Andrew V Makarow <makarow at mail.com>, for zhenya <http://chukharev.ru>
 
 =cut
 

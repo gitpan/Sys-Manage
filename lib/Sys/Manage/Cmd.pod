@@ -54,7 +54,7 @@ Sys::Manage::Cmd - Systems management command volley
 
 =item Options of command line
 
-(see also C<-cline> and C<-i>, C<-k>, C<-l>, C<-o>, C<-r>, C<-t>, C<-u>, C<-x>, C<-v>, C<-g>)
+(see also C<-cline> and C<-c>, C<-i>, C<-k>, C<-l>, C<-o>, C<-r>, C<-t>, C<-u>, C<-x>, C<-v>, C<-g>)
 
 	-kNameSpace	- kind (namespace) of command
 	-rCommandId	- redo command id (used also inside '-l'); or switch (for '-a')
@@ -68,6 +68,8 @@ Sys::Manage::Cmd - Systems management command volley
 				'b'ranched (concurrent branches)
 	-tTargetName	- target, may be several '-t', instead of positional argument
 	-xTargetExcl	- exclusion from target list, may be several '-x'
+	-cCompleteName  - add summary execution of scriptic command using this target
+	-c		- 'complete' is default target for summary execution
 	-uUser:pswd	- user name and password for target
 	-g		- ping target before command, also use -gPingTimeout
 	-gx		- exclude unsuccessful targets sequentially
@@ -87,9 +89,9 @@ Sys::Manage::Cmd - Systems management command volley
 	cmdfile		- evaluate command lines file or Perl script using
 				Sys::Manage::CmdFile
 	regask		- display registration file system filtered with condition:
-				'all', 'dir's, 'pid's, 'err's, expression
+				'all', 'dir's, 'pid's, 'err's, 'warn's and errs, expression
 	logask		- display '-log' filtered with condition:
-				'all', 'pid's, 'err's, expression
+				'all', 'pid's, 'err's, 'warn's and errs, expression
 	cmdstat		- display current status using 'logask', deprecated
 	!elem!, <	- target element and source file substitutions
 	!user!, !pswd!	- user name and password substitutions
@@ -455,6 +457,20 @@ Subsequent turns of loop may be 'v'erbose to current console for testing
 or opened in a new console 'w'indow. 
 These behaviours are very dependent on platform.
 
+
+=item -cnsum
+
+=item -c
+
+	=> false | name | 'complete' if '-c' only
+
+Add summary execution of scriptic command line
+using given value as target name in $ENV{SMELEM}.
+Default 'complete' used if C<-c> only in the command line.
+
+The script may read STDIN for contents of all logs 
+(execution registration files) of the command.
+$ENV{SMLOG} contains directory name of this files.
 
 
 =item -cpause
@@ -839,11 +855,36 @@ $ENV{SMUSER}	- target element user.
 
 =back
 
+=head1 LIMITATIONS, BUGS, PROBLEMS
+
+=over
+
+
+=item Limitations, Bugs, Problems
+
+
+=over
+
+Implemented and tested with Perl 5.6.0 and 5.8.8 on Windows 2000/2003.
+
+Requoting of command lines is not exhaustive.
+
+Fault tolerance for var files is commented in the source code, this is in doubt.
+
+Exhaustive timeouts may be implemented only with $SIG{ALRM} and alarm().
+
+See at the top of the source code.
+
+=back
 
 
 =head1 VERSION
 
 =over
+
+=item '2009-10-04'
+
+New C<-cnsum>/C<-c>.
 
 
 =item '2009-05-18'

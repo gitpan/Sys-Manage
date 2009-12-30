@@ -304,8 +304,11 @@ See also C<-perl>.
 
 =item -mark
 
+	=> '----ret$?$!$@: '
+
 Command output end marker.
 Used by C<getret> to finish C<-agent> reading.
+Output of the remote execution should not contain C<-mark> value.
 
 
 =item -node
@@ -1015,10 +1018,41 @@ Saved STDOUT file handle.
 
 =back
 
+=head1 LIMITATIONS, BUGS, PROBLEMS
+
+=over
+
+
+=item Limitations, Bugs, Problems
+
+
+=over
+
+Implemented and tested with Perl 5.6.0 and 5.8.8 on Windows 2000/2003.
+
+Output of the remote execution should not contain C<-mark> value.
+
+Interactive remote execution not supported.
+
+Requoting of command lines is not exhaustive.
+
+Binmode for file operations should be off, do not use C<-b->, it is reserved only.
+
+Exhaustive timeouts may be implemented only with $SIG{ALRM} and alarm().
+
+See at the top of the source code.
+
+=back
+
 
 =head1 VERSION
 
 =over
+
+=item '2009-12-28'
+
+C<Limitations, Bugs, Problems> added.
+
 
 =item '2009-03-23'
 

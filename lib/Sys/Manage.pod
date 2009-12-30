@@ -20,6 +20,22 @@ See particular modules.
 
 =over
 
+=item '2009-12-30'
+
+Publishing 1.0 version, the code seems to be stable enough.
+
+Some improvements made in the code and documentation of
+L<Sys::Manage::Cmd|Sys/Manage/Cmd>,
+L<Sys::Manage::Conn|Sys/Manage/Conn>,
+L<Sys::Manage::Schedule|Sys/Manage/Schedule>,
+L<Sys::Manage::Desktops|Sys/Manage/Desktops>.
+
+Further developments are in doubt because my job was moved.
+
+On the other hand, future prospect may be in 
+multi-client/multi-server == multi-agent/multi-manager
+architecture...
+
 
 =item '2009-06-30'
 

@@ -4,12 +4,11 @@
 #
 # makarow, 2005-09-19
 #
-#
+# ToDo (see also '???', '!!!' in the source code):
 # - timeouts with $SIG{ALRM} and alarm() for 'sub connect' and 'sub agt'
-# !!! ??? see in source code.
 # ??? interactive to user commands.
 # ??? do not use -b- option due to incorrect file sizing.
-# ??? uniqueness of -mark, concepts of '-mark' and 'eval'.
+# ??? uniqueness of -mark.
 #
 
 package Sys::Manage::Conn;
@@ -22,7 +21,7 @@ use IO::Select;
 use Safe;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION = '0.62';
+$VERSION = '1.0';
 
 my $qlcl =0;	# quoting local args not needed because of shell quoting
 
@@ -1570,7 +1569,10 @@ sub rdo {	# Remote do
 	 : $x =~/\.(bat|cmd)/
 	 ? ('system($ENV{COMSPEC}||' .&$q('cmd.exe','/c',$r) 
 			.(scalar(@a) ?(',' .&$qq(@a)) :'') .');$rv=!($?>>8);')
-	 : ('do{@ARGV=(' .&$q(@a) .'); do ' .&$q($r) .'};'))
+	 : ('do{@ARGV=(' .&$q(@a) .'); $!=0; do ' .&$q($r) .'};'
+		.'$!=$^E=0 if defined($rv) ||$@;'
+		.'$m_->printflush("die $@") if $@ && !defined($rv);'
+		))
 	,($o =~/[pz](?![0-])/
 	 ?('{my @rc=($?,$!,$^E,@_);'
 	  .'chdir($wd);'

@@ -29,6 +29,8 @@
 #				'b'ranched (concurrent branches)
 #	-tTargetName	- target, may be several '-t', instead of positional argument
 #	-xTargetExcl	- exclusion from target list, may be several '-x'
+#	-cCompleteName  - add summary execution of scriptic command using this target
+#	-c              - 'complete' is default target for summary execution
 #	-uUser:pswd	- user name and password for target
 #	-g		- ping target before command, also use -gPingTimeout
 #	-gx		- exclude unsuccessful targets sequentially

@@ -13,10 +13,13 @@ Sys::Manage::CmdEscort - Sys::Manage::Cmd command execution escort
 
 =head1 DESCRIPTION
 
+=over
+
 Used internally by L<Sys::Manage::Cmd|Sys/Manage/Cmd>
 for loggings and redirections,
 as escort of each command execution on each target element.
 
+=back
 
 =head1 LICENSE
 
