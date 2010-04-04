@@ -20,6 +20,12 @@ See particular modules.
 
 =over
 
+=item '2010-04-04'
+
+Publishing 1.01 version, mics corrections
+in L<Sys::Manage::Desktops|Sys/Manage/Desktops>
+
+
 =item '2009-12-30'
 
 Publishing 1.0 version, the code seems to be stable enough.

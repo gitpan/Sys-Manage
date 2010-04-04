@@ -15,7 +15,7 @@ use strict;
 use Carp;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK $SELF);
-$VERSION = '1.0';
+$VERSION = '1.01';
 
 
 if ($^O eq 'MSWin32') {
@@ -691,7 +691,7 @@ sub frun {	# Run file / command
 		."'}";
 	local $SIG{__DIE__} ='DEFAULT';
 	$r =eval $x;
-	return($s->error($x,' -> ',$!))
+	return($s->error($x,' -> ',$s->erros))
 		if !defined($r) && $! && ($o !~/i/);
 	return($s->error($x,' -> ',$@))
 		if !defined($r) && $@ && ($o !~/i/);
@@ -1361,7 +1361,7 @@ sub dGet {		# Get assignment by ID
 
 sub dQuery {		# Query assignments
  my($s,$q,$n,$u) =@_;	# (category, node name, user name) -> [assignments]
-			# (-mcf), ('', system, user), startup, logon, runapp, logoff, shutdown
+			# (-mcf), ('', system, user), startup, logon, agent, runapp, logoff, shutdown
  $n ='(' .join('|', map {my $v =$_; $v =~s/([^\w\d])/\\$1/g; $v =~s/\\\\+/\\\\+/g; $v
 		} ref($n) ? @$n : @{$s->nnames($n)}) .')'
 	if $n && (ref($n) ne 'CODE');
@@ -1453,11 +1453,14 @@ sub dQuery {		# Query assignments
 	my $l;
 	while (1) {
 		undef $!;
-		if (!defined($l =<FILE>)) {
-			return($s->error("dQuery('readline') -> " .$s->erros)) if $!;
+		if (eof(FILE) || !defined($l =<FILE>)) {
+			return($s->error("dQuery("
+				.join(",", map {defined($_) ? "'$_'" : 'undef'} 'readline', $s->{-dla}, $q)
+				.") -> " .$s->erros()))
+				if $!;
 			$yq =	!defined($qu) ? !$qm : (!$qu || ($qu eq 'system'))
 				if !defined($yq);
-			$ha->{$id} =1 if $id && $yq && $yn && $yu && $yc;
+			$ha->{$id} =1 if $id && $yq && $yn && $yu && $yc && $yt;
 			last
 		}
 		elsif ($l =~/^[\s#]*[\r\n]/) {
@@ -1563,8 +1566,11 @@ sub dQuery {		# Query assignments
 	$yd =1;
 	while (1) {
 		undef $!;
-		if (!defined($l =<FILE>)) {
-			return($s->error("dQuery('readline') -> " .$s->erros)) if $!;
+		if (eof(FILE) || !defined($l =<FILE>)) {
+			return($s->error("dQuery("
+				.join(",", map {defined($_) ? "'$_'" : 'undef'} 'readline', $s->{-dla}, $q)
+				.") -> " .$s->erros()))
+				if $!;
 			last
 		}
 		elsif ($l =~/^[\s#]*[\r\n]/) {
@@ -1822,9 +1828,9 @@ sub acRfm {	# Assignment call manager filesystem
 	? $s->{-dirmrs}
 	: $m =~/^(?:user|-dirmru)/
 	? $s->{-dirmru}
-	: $m =~/^(?:startup|apply|shutdown|-dirmls)/
+	: $m =~/^(?:startup|agent|apply|shutdown|-dirmls)/
 	? $s->{-dirmls}
-	: $m =~/^(?:logon|logoff|-dirmlu)/
+	: $m =~/^(?:logon|runapp|logoff|-dirmlu)/
 	? $s->{-dirmlu}
 	: $s->error("acRfm('$m') -> unexpected mode");
  return(undef)	if !$dv;
@@ -2055,19 +2061,19 @@ sub acRun {	# Assignment call run
 		.(do{my $v =$cmd; $v =~s/\\/\\\\/g; $v =~s/'/\\'/g; $v})
 		."'}";
 	if (!defined($r) && $!) {
-		$err ="do '$cmd': $!";
+		$err ="do '$cmd' -> " .$s->erros;
 	}
 	elsif (!defined($r) && $@) {
 		if ($cmf =~/\@/) {
-			$err ="do '$cmd': $@";
+			$err ="do '$cmd' -> $@";
 		}
 		else {
-			warn("do '$cmd': $@");
+			warn("do '$cmd' -> $@");
 		}
 	}
 	elsif (($r && ($cmf =~/\!/))
 	||    (!$r && ($cmf =~/\?/))) {
-		$err ="do '$cmd': " .(defined($r) ? $r : 'undef');
+		$err ="do '$cmd' -> " .(defined($r) ? "'$r'" : 'undef');
 	}
  }
  elsif ($cmd =~/^eval\s(.+)$/) {
@@ -2076,15 +2082,15 @@ sub acRun {	# Assignment call run
 	$r =eval "{package main; $r}";
 	if (!defined($r) && $@) {
 		if ($cmf =~/\@/) {
-			$err ="eval '$cmd': $@";
+			$err ="eval '$cmd' -> $@";
 		}
 		else {
-			warn("eval '$cmd': $@");
+			warn("eval '$cmd' -> $@");
 		}
 	}
 	elsif (($r && ($cmf =~/\!/))
 	||    (!$r && ($cmf =~/\?/))) {
-		$err ="eval '$cmd': " .(defined($r) ? $r : 'undef');
+		$err ="eval '$cmd' -> " .(defined($r) ? "'$r'" : 'undef');
 	}
  }
  else {
@@ -2092,20 +2098,21 @@ sub acRun {	# Assignment call run
 	$r =system($cmd);
 	if ($r <0) {
 		$r =0;
-		$err ="system '$cmd': " .$s->erros;
+		$err ="system '$cmd' -> " .$s->erros;
 	}
 	else {
 		$r  =1;
 		my $rc =($? >> 8);
 		$reg && $s->acReg($ae, '', '-exit=' .$rc);
-		$err ="system '$cmd': $rc"	# unsuccess
+		$err ="system '$cmd' -> $rc"	# unsuccess
 			if 	(($cmf =~/\?/) && $rc)
 			||	(($cmf =~/\!/) && !$rc);
 	}
  }
  if ($err) {
-	$err .="; $@"	if $reg && !eval{$s->acRegRen($ae, '.err')};
 	$err .="; $@"	if ($op eq '-do') && !eval{$s->meDel($ae)};
+	$err .="; $@"	if $reg && (!eval{$s->acReg($ae, '', '-error=' .$err)});
+	$err .="; $@"	if $reg && !(eval{$s->acRegRen($ae, '.err')});
 	return($s->error($err));
  }
  $s->meStore($ae)	if $op eq '-do';
@@ -2273,13 +2280,21 @@ sub Run {	# Run module
 
  local *NETLCK;
  if ( (($s->{-runmode} =~/^(?:startup|shutdown)$/)
-	||($s->{-runmode} eq 'agent') && ($arg[1] eq 'apply'))
+	||(($s->{-runmode} eq 'agent') && $arg[1] && ($arg[1] =~/^(?:apply|loop)$/)))
  && ($_ =$s->{-dirmls} ||$s->{-dirmrs})
  && (/^([\w:]*[\\\/]*[^\\\/]+[\\\/][^\\\/]+)/)) {
 	$s->errinfo("NETLCK('$1'): "
 		.(opendir(NETLCK,$1)
 		? 'ok'
 		: $s->erros()))
+ }
+ elsif (($s->{-runmode} =~/^(?:logon|logoff)$/)
+ && ($_ =$s->{-dirmlu} ||$s->{-dirmru})
+ && (/^([\w:]*[\\\/]*[^\\\/]+[\\\/][^\\\/]+)/)) {
+	0 && $s->errinfo("NETLCK('$1'): "
+		.(opendir(NETLCK,$1)
+		? 'ok'
+		: $s->erros()));
  }
 
  my $l;
@@ -2300,6 +2315,8 @@ sub Run {	# Run module
 	local $s->{-ymyn} =$s->{-yasg};
 	local ($s->{-dca}, $s->{-dla}) =(1, $s->{-dla});
 	$l =$s->dQuery($s->{-runmode}, 1);
+	$s->alRun($l)	if @$l;
+	$l =$s->dQuery('agent', 1);
 	$s->alRun($l)	if @$l;
 	$l =$s->acQuery('system', 1);
 	$s->alRun($l,1)	if @$l;
@@ -2420,6 +2437,11 @@ sub Run {	# Run module
 	}
 	elsif ($arg[1] eq 'loop') {
 		$s->ulogon('r');
+
+		local ($s->{-dca}, $s->{-dla}) =(1, $s->{-dla});
+		$l =$s->dQuery('agent', 1, 1);
+		$s->alRun($l)	if @$l;
+
 		$l =$s->acQuery($s->{-user} ? '' : 'system', 1, 1);
 		if (@$l) {
 			my $t0 =3;
@@ -2448,7 +2470,7 @@ sub Run {	# Run module
 		my $t1 =$arg[2] && ($arg[2] =~/^\d+$/)
 			? $s->strtime($s->timeadd(time(),0,0,0,0,$arg[2]))
 			: $arg[1] eq 'start'
-			? $s->strtime($s->timeadd(time(),0,0,0,0,5))
+			? $s->strtime($s->timeadd(time(),0,0,0,0,30))
 			: $s->strtime($s->timeadd(time(),0,0,0,1));
 		$t1 =$1 if $t1 =~/\s([^\s]+)/;
 		my $cmd ="at $t1 $mgr agent loop"

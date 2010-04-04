@@ -92,7 +92,7 @@ Desktop or agent run modes may be used against desktop or agent system:
 C<startup>, C<logon>, C<agent>, C<runapp>, C<logoff>, C<shutdown>.
 
 Scriptic run modes may be used to define or organise appropriate scripts:
-C<startup>, C<logon>, C<logoff>, C<shutdown> for desktop or agent system.
+C<startup>, C<logon>, C<agent>, C<runapp>, C<logoff>, C<shutdown> for desktop or agent system.
 See also C<startup1> and C<logon1> C<Script Modes>.
 
 Run modes to check or execute assignments 
@@ -112,6 +112,8 @@ C<agent> uses 'at' Scheduler commands, may be activated via 'C<startup period>' 
 Periodical agent operation.
 C<system> assignments may be executed.
 C<user> assignments may be checked, if possible.
+Default period is 1 hour between 'C<agent> loop' and 
+30 minutes before the first 'C<agent> loop' after 'C<agent> start'.
 
 This item is very platform dependent, see C<Limitations, Bugs, Problems>.
 
@@ -203,7 +205,7 @@ Execute C<startup>, start C<agent>, if appropriate.
 =item Script Modes
 
 C<-under> assignment parameter may be used to define
-C<startup>, C<logon>, C<logoff>, C<shutdown> scripts,
+C<startup>, C<logon>, C<agent>, C<runapp>, C<logoff>, C<shutdown> scripts,
 and also post-C<startup> and post-C<logon> scripts.
 
 Post-C<startup> scripts will be executed after C<startup> scripts and C<startup> C<system> assignments.
@@ -370,7 +372,7 @@ Path to menu command files or application startup scripts for C<-mcf> and C<refr
 
 File paths for log files on manager.
 Will be assigned to C<$ENV{SMLOG}>
-for C<startup>, C<logon>, C<logoff>, C<shutdown> scripts.
+for C<startup>, C<logon>, C<agent>, C<runapp>, C<logoff>, C<shutdown> scripts.
 Subdirectories will be created when required.
 Path mask may be used with symbols following:
 
@@ -751,7 +753,7 @@ C<-uadmin> and C<-ucon> C<Script Configuration> values required to execute assig
 	=> empty | 'system' | 'user' | 'startup' | 'logon' | 'logoff' | 'shutdfown'
 
 How to execute assignment:
-at each C<startup>, C<logon>, C<logoff>, C<shutdown>,
+at each C<startup>, C<logon>, C<agent>, C<runapp>, C<logoff>, C<shutdown>,
 or once under C<user> or C<system> session.
 Empty value treated as C<system>.
 See also C<Run Modes>, C<Assignment Modes>.
@@ -790,7 +792,7 @@ ID of the assignment running.
 
 First and last parts of file path to upload to manager.
 Obtained using C<-dirmls> or C<-dirmlu>.
-For C<startup>, C<shutdown>, C<logon>, C<logoff> scripts
+For C<startup>, C<logon>, C<agent>, C<runapp>, C<logoff>, C<shutdown> scripts
 this is C<$ENV{SMLOG}> broken on C<$ENV{SMID}>.
 
 
@@ -799,7 +801,7 @@ this is C<$ENV{SMLOG}> broken on C<$ENV{SMID}>.
 Registration file path and name, may be used for output of the command.
 May contain blanks and may need to be quoted in command lines,
 i.e. cmd.exe /c dir c:\\>>"%SMLOG%".
-For C<startup>, C<shutdown>, C<logon>, C<logoff> scripts
+For C<startup>, C<logon>, C<agent>, C<runapp>, C<logoff>, C<shutdown> scripts
 this is log file name formed using C<-dirmls> and C<-dirmlu>.
 
 
@@ -1228,6 +1230,18 @@ See at the top of the source code.
 =head1 VERSION
 
 =over
+
+
+=item '2010-01-20'
+
+Mics corrections in error messages.
+
+C<-dla> file may not be ended with "\n".
+
+Default period between C<agent> 'start' and C<agent> 'loop' corrected to 30 minutes.
+
+C<Script Modes>: C<runapp> documented, C<agent> new.
+
 
 =item '2009-12-08'
 
